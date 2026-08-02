@@ -2,3 +2,4 @@ streamlit
 google-genai
 fpdf2
 markdown2
+matplotlib
