@@ -41,5 +41,5 @@ Diferente de geradores de conteúdo tradicionais — que costumam reproduzir abo
 
 1. **Clone o repositório:**
    ```bash
-   git clone [https://github.com/SEU-USUARIO/SEU-REPOSITORIO.git](https://github.com/SEU-USUARIO/SEU-REPOSITORIO.git)
-   cd SEU-REPOSITORIO
+   git clone [https://github.com/ericmatsouza-gif/gerador-de-aulas-phc.git](https://github.com/ericmatsouza-gif/gerador-de-aulas-phc.git)
+   cd gerador-de-aulas-phc
