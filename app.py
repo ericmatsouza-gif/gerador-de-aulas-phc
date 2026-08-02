@@ -246,10 +246,28 @@ def desenhar_fracao(pdf: FPDF, numerador: str, denominador: str, fonte: str):
 
 
 def escrever_com_fracoes(pdf: FPDF, texto: str, fonte: str):
-    """Escreve texto com frações (num / den) renderizadas verticalmente."""
-    padrao = re.compile(r'\(([^/()\n]+?)\s*/\s*([^/()\n]+?)\)')
+    """
+    Escreve texto com frações (num / den) renderizadas verticalmente.
+
+    CORREÇÃO:
+    Não converte frações que fazem parte de expoentes, como:
+        (81)^(3/4)
+        x^(5/8)
+        a^(m/n)
+
+    Nesses casos a fração pertence ao expoente e não deve ser desenhada
+    como fração vertical.
+    """
+
+    # Frações comuns: (a / b), mas NÃO quando vierem imediatamente após ^
+    padrao = re.compile(
+        r'(?<!\^)\(([^/()\n]+?)\s*/\s*([^/()\n]+?)\)'
+    )
+
     cursor = 0
+
     for m in padrao.finditer(texto):
+
         # Texto antes da fração
         antes = texto[cursor:m.start()]
         if antes:
@@ -262,12 +280,16 @@ def escrever_com_fracoes(pdf: FPDF, texto: str, fonte: str):
                 else:
                     pdf.set_font(fonte, "", 10)
                     pdf.write(5.5, trecho)
-        # Fração vertical
+
+        # Desenha a fração
         num = re.sub(r'\*+', '', m.group(1)).strip()
         den = re.sub(r'\*+', '', m.group(2)).strip()
+
         desenhar_fracao(pdf, num, den, fonte)
+
         cursor = m.end()
-    # Texto restante após a última fração
+
+    # Texto restante
     resto = texto[cursor:]
     if resto:
         for trecho in re.split(r'(\*\*.*?\*\*)', resto):
@@ -279,6 +301,7 @@ def escrever_com_fracoes(pdf: FPDF, texto: str, fonte: str):
             else:
                 pdf.set_font(fonte, "", 10)
                 pdf.write(5.5, trecho)
+
     pdf.ln(9)
 
 
