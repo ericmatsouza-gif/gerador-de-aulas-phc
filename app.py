@@ -137,7 +137,13 @@ def sanitizar(texto: str) -> str:
     # Não toca em ** (negrito Markdown) nem em * isolado de início de linha (bullet)
     texto = re.sub(r'(?<=[0-9a-zA-Z²³⁰¹⁴⁵⁶⁷⁸⁹ⁿᵐᵏˣᵗ\)])\s*\*\s*(?=[0-9a-zA-Z\(])', ' · ', texto)
 
-    # 9. Remove backticks de código inline
+    # 9. Remove separadores Markdown (---)
+    texto = re.sub(r'^-{3,}$', '', texto.strip()) if re.match(r'^-{3,}$', texto.strip()) else texto
+
+    # 10. Remove itálico simples *texto* → texto (sem os asteriscos)
+    texto = re.sub(r'(?<![*])\*([^*\n]+?)\*(?![*])', r'\1', texto)
+
+    # 11. Remove backticks de código inline
     texto = texto.replace('`', '')
 
     return texto
@@ -239,7 +245,9 @@ def escrever_com_fracoes(pdf: FPDF, texto: str, fonte: str):
                     pdf.set_font(fonte, "", 10)
                     pdf.write(5.5, trecho)
         # Fração vertical
-        desenhar_fracao(pdf, m.group(1).strip(), m.group(2).strip(), fonte)
+        num = re.sub(r'\*+', '', m.group(1)).strip()
+        den = re.sub(r'\*+', '', m.group(2)).strip()
+        desenhar_fracao(pdf, num, den, fonte)
         cursor = m.end()
     # Texto restante após a última fração
     resto = texto[cursor:]
@@ -272,6 +280,10 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
 
         if not s:
             pdf.ln(2)
+            continue
+
+        # Ignora separadores Markdown (---)
+        if re.match(r'^-{3,}$', s):
             continue
 
         # H1 — seção principal: fundo azul
