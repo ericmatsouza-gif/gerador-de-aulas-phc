@@ -219,6 +219,7 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
 
 
 # ── GERAÇÃO DE CONTEÚDO VIA GEMINI COM FALLBACK AUTOMÁTICO ────────────────────
+# ── GERAÇÃO DE CONTEÚDO VIA GEMINI COM FALLBACK SEGURO ─────────────────────────
 def gerar_conteudo_phc(client: genai.Client, disciplina: str,
                        ano_escolar: str, assunto: str,
                        codigo_bncc: str = "") -> str:
@@ -278,11 +279,12 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     - NÃO inclua saudações. Comece direto no título '# 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO'.
     """
 
+    # Nomes OFICIAIS aceitos pela API do Google AI Studio
     modelos = [
         'gemini-flash-latest',
-        'gemini-2.5-flash',
         'gemini-2.0-flash',
-        'gemini-2.5-pro'
+        'gemini-1.5-flash',
+        'gemini-1.5-pro'
     ]
     
     ultimo_erro = None
@@ -294,11 +296,11 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
             )
             return response.text
         except APIError as e:
-    msg_erro = str(e).upper()
-    if any(codigo in msg_erro for codigo in ["503", "UNAVAILABLE", "404", "NOT_FOUND", "429", "RESOURCE_EXHAUSTED", "QUOTA"]):
-        ultimo_erro = e
-        time.sleep(2)  # Dá uma pausa de 2 segundos antes de tentar o próximo modelo
-        continue
+            msg_erro = str(e).upper()
+            if any(codigo in msg_erro for codigo in ["503", "UNAVAILABLE", "404", "NOT_FOUND", "429", "RESOURCE_EXHAUSTED", "QUOTA"]):
+                ultimo_erro = e
+                time.sleep(3)  # Pausa de 3 segundos para recompor a cota por segundo/minuto
+                continue
             raise e
             
     if ultimo_erro:
