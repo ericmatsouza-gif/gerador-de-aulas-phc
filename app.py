@@ -1,6 +1,6 @@
 import os
 import re
-from flask import Flask, render_template, request, send_file, flash, redirect, url_for
+import streamlit as st
 import google.generativeai as genai
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
@@ -8,27 +8,25 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-app = Flask(__name__)
-app.secret_key = "sua_chave_secreta_aqui"
+# Configuração da página Streamlit
+st.set_page_config(page_title="Gerador de Aulas", page_icon="📚")
 
-# Configuração da API do Gemini
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+# Configura a API Key (pode vir das variáveis de ambiente ou Secrets do Streamlit)
+api_key = os.environ.get("GEMINI_API_KEY")
+if api_key:
+    genai.configure(api_key=api_key)
 
 # ------------------------------------------------------------------------------
-# TRATAMENTO DE TEXTO (Remove os erros visuais de ^, \hat, cifrões e LaTeX)
+# 1. TRATAMENTO DE TEXTO (Sanitização)
 # ------------------------------------------------------------------------------
 def sanitizar(texto: str) -> str:
     if not texto:
         return ""
 
-    # 1. Corrige a acentuação e potências como \hat{n} ou a\hat{n}n
     texto = re.sub(r'\\hat\{([^}]+)\}', r'^\1', texto)
     texto = re.sub(r'\\hat\b', '^', texto)
-
-    # 2. Remove os cifrões do Gemini ($)
     texto = texto.replace('$', '')
 
-    # 3. Limpa estruturas LaTeX e converte para texto normal
     texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
     texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'raiz_\1(\2)', texto)
     texto = re.sub(r'\\sqrt\{([^}]+)\}', r'raiz(\1)', texto)
@@ -38,16 +36,13 @@ def sanitizar(texto: str) -> str:
     texto = re.sub(r'\\(left|right|displaystyle|limits|nolimits)', '', texto)
     texto = re.sub(r'\\[a-zA-Z]+', '', texto)
 
-    # 4. Ajusta operadores e expoentes
     texto = texto.replace('!=', '≠').replace('>=', '≥').replace('<=', '≤')
     texto = re.sub(r'\^\{([^}]+)\}', r'^(\1)', texto)
 
-    # Sobrescritos diretos para expoentes de 1 dígito
     sobrescritos = {'0':'⁰', '1':'¹', '2':'²', '3':'³', '4':'⁴', '5':'⁵', '6':'⁶', '7':'⁷', '8':'⁸', '9':'⁹'}
     for num, sub in sobrescritos.items():
         texto = re.sub(rf'\^{num}(?!\d)', sub, texto)
 
-    # Símbolos matemáticos
     mapa = {
         r'\times': '×', r'\div': '÷', r'\cdot': '·',
         r'\approx': '≈', r'\neq': '≠', r'\le': '≤', r'\leq': '≤',
@@ -59,13 +54,15 @@ def sanitizar(texto: str) -> str:
 
     return texto.replace('`', '').strip()
 
+# ------------------------------------------------------------------------------
+# 2. GERAÇÃO DO PDF EM MEMÓRIA VIA REPORTLAB
+# ------------------------------------------------------------------------------
+def gerar_pdf_bytes(conteudo_limpo):
+    import io
+    buffer = io.BytesIO()
 
-# ------------------------------------------------------------------------------
-# GERAÇÃO DE PDF VIA REPORTLAB
-# ------------------------------------------------------------------------------
-def gerar_pdf(conteudo_limpo, caminho_saida):
     doc = SimpleDocTemplate(
-        caminho_saida,
+        buffer,
         pagesize=letter,
         rightMargin=1.5 * cm,
         leftMargin=1.5 * cm,
@@ -127,57 +124,53 @@ def gerar_pdf(conteudo_limpo, caminho_saida):
             story.append(Paragraph(linha_formatada, estilo_corpo))
 
     doc.build(story)
-
+    buffer.seek(0)
+    return buffer
 
 # ------------------------------------------------------------------------------
-# ROTAS FLASK
+# 3. INTERFACE STREAMLIT
 # ------------------------------------------------------------------------------
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        topico = request.form.get("topico")
-        nivel = request.form.get("nivel", "Ensino Médio")
+st.title("📚 Gerador de Atividades Didáticas")
 
-        if not topico:
-            flash("Por favor, insira um tópico para a atividade.", "danger")
-            return redirect(url_for("index"))
+topico = st.text_input("Tópico da Aula:", placeholder="Ex: Equações do 2º Grau")
+nivel = st.selectbox("Nível de Ensino:", ["Ensino Fundamental II", "Ensino Médio", "EJA"])
 
-        prompt = f"""
-        Você é um assistente pedagógico especializado em criar materiais didáticos de Matemática e Física.
-        Crie uma lista de exercícios/atividade pedagógica sobre o tema: "{topico}", nível "{nivel}".
+if st.button("Gerar Atividade PDF", type="primary"):
+    if not topico:
+        st.warning("Por favor, informe o tópico.")
+    else:
+        with st.spinner("Gerando conteúdo pedagógico..."):
+            try:
+                prompt = f"""
+                Você é um assistente pedagógico especializado em criar materiais didáticos de Matemática e Física.
+                Crie uma lista de exercícios/atividade pedagógica sobre o tema: "{topico}", nível "{nivel}".
 
-        REGRAS RÍGIDAS DE FORMATAÇÃO:
-        1. NÃO USE sintaxe LaTeX em hipótese alguma (proibido o uso de $, \\frac, \\hat, \\text, \\sqrt, etc.).
-        2. NÃO utilize cifrões ($) no texto.
-        3. Para potências e expoentes, use apenas a notação simples de teclado com circunflexo. Exemplo: a^n, (1+i)^t, 2^10.
-        4. NUNCA escreva comandos como \\hat{{n}} ou a\\hat{{n}}n. Escreva simplesmente a^n.
-        5. Use marcadores Markdown simples (# para Título Principal, ## para Subtítulos, **texto** para negrito).
-        6. Organize a atividade em:
-           - Cabeçalho / Título
-           - Breve Resumo Teórico / Conceitos Chave
-           - Questões Propostas
-           - Gabarito Comentado no final.
-        """
+                REGRAS RÍGIDAS DE FORMATAÇÃO:
+                1. NÃO USE sintaxe LaTeX em hipótese alguma (proibido o uso de $, \\frac, \\hat, \\text, \\sqrt, etc.).
+                2. NÃO utilize cifrões ($) no texto.
+                3. Para potências e expoentes, use apenas a notação simples de teclado com circunflexo. Exemplo: a^n, (1+i)^t, 2^10.
+                4. NUNCA escreva comandos como \\hat{{n}} ou a\\hat{{n}}n. Escreva simplesmente a^n.
+                5. Use marcadores Markdown simples (# para Título Principal, ## para Subtítulos, **texto** para negrito).
+                6. Organize a atividade em:
+                   - Cabeçalho / Título
+                   - Breve Resumo Teórico / Conceitos Chave
+                   - Questões Propostas
+                   - Gabarito Comentado no final.
+                """
 
-        try:
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content(prompt)
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                response = model.generate_content(prompt)
 
-            texto_sanitizado = sanitizar(response.text)
+                texto_sanitizado = sanitizar(response.text)
+                pdf_buffer = gerar_pdf_bytes(texto_sanitizado)
 
-            caminho_pdf = os.path.join("static", "atividade.pdf")
-            os.makedirs("static", exist_ok=True)
+                st.success("Atividade gerada com sucesso!")
+                st.download_button(
+                    label="📥 Baixar PDF",
+                    data=pdf_buffer,
+                    file_name="atividade_didatica.pdf",
+                    mime="application/pdf"
+                )
 
-            gerar_pdf(texto_sanitizado, caminho_pdf)
-
-            return send_file(caminho_pdf, as_attachment=True, download_name="atividade_didatica.pdf")
-
-        except Exception as e:
-            flash(f"Ocorreu um erro ao gerar a atividade: {str(e)}", "danger")
-            return redirect(url_for("index"))
-
-    return render_template("index.html")
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
+            except Exception as e:
+                st.error(f"Erro ao gerar o PDF: {str(e)}")
