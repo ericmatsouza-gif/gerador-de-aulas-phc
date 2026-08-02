@@ -286,7 +286,7 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     
     # Executa apenas no modelo Flash principal
     response = client.models.generate_content(
-        model='gemini-2.0-flash',
+        model='gemini-flash-latest',
         contents=prompt,
         config=config
     )
