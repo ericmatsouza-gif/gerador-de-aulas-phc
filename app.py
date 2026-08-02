@@ -36,556 +36,353 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
-# ── FONTES DejaVu (TTF Unicode) ───────────────────────────────────────────────
+# ── LOCALIZAÇÃO DE FONTES ─────────────────────────────────────────────────────
 def _localizar_fontes_dejavu() -> str:
-    sistema = "/usr/share/fonts/truetype/dejavu"
-    if os.path.isfile(os.path.join(sistema, "DejaVuSans.ttf")):
-        return sistema + "/"
-    if os.path.isdir("/usr/share/fonts"):
-        for root, dirs, files in os.walk("/usr/share/fonts"):
-            if "DejaVuSans.ttf" in files:
-                return root + "/"
-    try:
-        import matplotlib
-        mpl_dir = os.path.join(
-            os.path.dirname(matplotlib.__file__), "mpl-data", "fonts", "ttf"
-        )
-        if os.path.isfile(os.path.join(mpl_dir, "DejaVuSans.ttf")):
-            return mpl_dir + "/"
-    except ImportError:
-        pass
-    raise FileNotFoundError("Fontes DejaVu não encontradas.")
+    paths = [
+        "/usr/share/fonts/truetype/dejavu/",
+        "/usr/share/fonts/dejavu/",
+    ]
+    for p in paths:
+        if os.path.isfile(os.path.join(p, "DejaVuSans.ttf")):
+            return p
+    return ""
 
-try:
-    FONT_DIR = _localizar_fontes_dejavu()
-except Exception:
-    FONT_DIR = ""
+FONT_DIR = _localizar_fontes_dejavu()
 
+# ── RENDERIZADOR ROBUSTO (PHCRenderer) ─────────────────────────────────────────
+class PHCRenderer:
+    """
+    Renderizador extensível para documentos pedagógicos.
+    Substitui a abordagem baseada apenas em regex por um processador de fluxo.
+    """
+    def __init__(self, pdf, font_name="DejaVu", base_size=10):
+        self.pdf = pdf
+        self.font_name = font_name
+        self.base_size = base_size
+        self.line_height = 6.0
+        self.bold = False
+        self.size_mult = 1.0
+        self.y_offset = 0
+        self.in_exponent = False
+        
+    def _apply_style(self):
+        style = "B" if self.bold else ""
+        size = self.base_size * self.size_mult
+        self.pdf.set_font(self.font_name, style, size)
 
-# ── CACHE DO CLIENTE GEMINI ────────────────────────────────────────────────────
-@st.cache_resource
-def get_gemini_client(api_key: str) -> genai.Client:
-    return genai.Client(api_key=api_key)
+    def _write(self, text):
+        self._apply_style()
+        if self.y_offset != 0:
+            x, y = self.pdf.get_x(), self.pdf.get_y()
+            self.pdf.set_y(y + self.y_offset)
+            self.pdf.write(self.line_height, text)
+            self.pdf.set_xy(self.pdf.get_x(), y)
+        else:
+            self.pdf.write(self.line_height, text)
 
+    def draw_fraction(self, num_text, den_text):
+        if self.in_exponent:
+            self._write(f"({num_text}/{den_text})")
+            return
 
-# ── SANITIZAÇÃO: LaTeX → texto plano Unicode ──────────────────────────────────
+        x0, y0 = self.pdf.get_x(), self.pdf.get_y()
+        old_mult = self.size_mult
+        self.size_mult *= 0.85
+        self._apply_style()
+        
+        w_num = self.pdf.get_string_width(num_text)
+        w_den = self.pdf.get_string_width(den_text)
+        w_frac = max(w_num, w_den) + 2
+        h_cell = self.line_height * 0.7
+        
+        self.pdf.set_xy(x0 + (w_frac - w_num)/2, y0 - h_cell/2 - 0.5)
+        self.pdf.write(h_cell, num_text)
+        
+        self.pdf.set_draw_color(44, 62, 80)
+        self.pdf.set_line_width(0.2)
+        self.pdf.line(x0, y0 + self.line_height/2, x0 + w_frac, y0 + self.line_height/2)
+        
+        self.pdf.set_xy(x0 + (w_frac - w_den)/2, y0 + h_cell/2 + 0.5)
+        self.pdf.write(h_cell, den_text)
+        
+        self.pdf.set_xy(x0 + w_frac + 1, y0)
+        self.size_mult = old_mult
+        self._apply_style()
+
+    def render_span(self, text):
+        i = 0
+        while i < len(text):
+            if text.startswith("**", i):
+                self.bold = not self.bold
+                i += 2
+                continue
+            
+            if text[i] == "^":
+                i += 1
+                content = ""
+                if i < len(text) and text[i] == "(":
+                    i += 1
+                    balance = 1
+                    start = i
+                    while i < len(text) and balance > 0:
+                        if text[i] == "(": balance += 1
+                        elif text[i] == ")": balance -= 1
+                        if balance > 0: i += 1
+                    content = text[start:i]
+                    i += 1
+                else:
+                    start = i
+                    while i < len(text) and (text[i].isalnum() or text[i] in "+-"):
+                        i += 1
+                    content = text[start:i]
+                
+                old_mult, old_y, old_exp = self.size_mult, self.y_offset, self.in_exponent
+                self.size_mult *= 0.7
+                self.y_offset -= 2.5
+                self.in_exponent = True
+                self.render_span(content)
+                self.size_mult, self.y_offset, self.in_exponent = old_mult, old_y, old_exp
+                continue
+
+            if text[i] == "(":
+                balance, j, slash_pos = 1, i + 1, -1
+                while j < len(text) and balance > 0:
+                    if text[j] == "(": balance += 1
+                    elif text[j] == ")": balance -= 1
+                    elif text[j] == "/" and balance == 1: slash_pos = j
+                    if balance > 0: j += 1
+                if slash_pos != -1:
+                    num, den = text[i+1:slash_pos].strip(), text[slash_pos+1:j].strip()
+                    self.draw_fraction(num, den)
+                    i = j + 1
+                    continue
+            
+            match_raiz = re.match(r'(?:raiz|\d*√)\(', text[i:])
+            if match_raiz:
+                prefix = match_raiz.group(0)[:-1]
+                i += len(match_raiz.group(0))
+                balance, start = 1, i
+                while i < len(text) and balance > 0:
+                    if text[i] == "(": balance += 1
+                    elif text[i] == ")": balance -= 1
+                    if balance > 0: i += 1
+                content, i = text[start:i], i + 1
+                y_root = self.pdf.get_y()
+                self._write("√" if not prefix or prefix == "raiz" else prefix)
+                x_start = self.pdf.get_x()
+                self.render_span(content)
+                self.pdf.set_draw_color(44, 62, 80)
+                self.pdf.set_line_width(0.2)
+                self.pdf.line(x_start, y_root + 0.8, self.pdf.get_x(), y_root + 0.8)
+                continue
+
+            self._write(text[i])
+            i += 1
+
+    def render_line(self, text):
+        if not text.strip():
+            self.pdf.ln(self.line_height)
+            return
+        match_list = re.match(r'^(\s*)([-*•]|\d+\.)\s+', text)
+        if match_list:
+            bullet = match_list.group(2)
+            indent = len(match_list.group(1)) * 2 + 5
+            text = text[len(match_list.group(0)):]
+            self.pdf.set_x(self.pdf.l_margin + indent - 5)
+            self._write(bullet + " ")
+            self.pdf.set_x(self.pdf.l_margin + indent)
+        else:
+            self.pdf.set_x(self.pdf.l_margin)
+        self.render_span(text)
+        self.pdf.ln(self.line_height + 2)
+
+# ── SANITIZAÇÃO ───────────────────────────────────────────────────────────────
 def sanitizar(texto: str) -> str:
-    """
-    Remove toda sintaxe LaTeX e converte para texto plano Unicode.
-    CORREÇÃO CRÍTICA: sobrescritos numéricos usam lookahead negativo (?!\\d)
-    para evitar que ^1 em ^12, ^10, ^15 etc. seja convertido para ¹,
-    gerando saídas erradas como 2¹2 ou (1,10)¹2.
-    """
-    if not texto:
-        return ""
-
-    # 1. Remove cifrões LaTeX
+    if not texto: return ""
     texto = re.sub(r'\$+', '', texto)
-
-    # 2. Comandos LaTeX estruturais → texto plano
     texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
-    texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'raiz_\1(\2)', texto)
+    texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'\1√(\2)', texto)
     texto = re.sub(r'\\sqrt\{([^}]+)\}',             r'raiz(\1)',     texto)
     texto = re.sub(r'\\text\{([^}]+)\}',             r'\1',           texto)
     texto = re.sub(r'\\(cdot|times)',   ' · ', texto)
     texto = re.sub(r'\\div\b',          ' / ',  texto)
     texto = re.sub(r'\\(left|right|displaystyle|limits|nolimits)', '', texto)
-    texto = re.sub(r'\\[a-zA-Z]+', '', texto)  # demais comandos \xyz
-
-    # 3. Potências com chaves → parênteses  ex: a^{m+n} → a^(m+n)
+    texto = re.sub(r'\\[a-zA-Z]+', '', texto)
     texto = re.sub(r'\^\{([^}]+)\}', r'^(\1)', texto)
-
-    # 4. Sobrescritos de expressões compostas entre parênteses
-    compostos = {
-        '^(m+n)': 'ᵐ⁺ⁿ', '^(m-n)': 'ᵐ⁻ⁿ', '^(m*n)': 'ᵐ·ⁿ', '^(m·n)': 'ᵐ·ⁿ',
-        '^(m/n)': 'ᵐ/ⁿ',  '^(n+1)': 'ⁿ⁺¹',
-    }
-    for orig, sub in compostos.items():
-        texto = texto.replace(orig, sub)
-
-    # 5. Sobrescritos de letras isoladas
-    letras = {
-        '^n': 'ⁿ', '^m': 'ᵐ', '^k': 'ᵏ', '^x': 'ˣ', '^t': 'ᵗ', '^a': 'ᵃ', '^p': 'ᵖ', '^i': 'ⁱ',
-    }
-    for orig, sub in letras.items():
-        # lookahead: só substitui se NÃO for seguido de letra ou dígito
-        texto = re.sub(re.escape(orig) + r'(?![a-zA-Z0-9])', sub, texto)
-
-    # 6. Sobrescritos numéricos de 1 dígito — LOOKAHEAD NEGATIVO (?!\d)
-    #    Impede que ^1 em ^12, ^10, ^15 etc. seja convertido para ¹
-    mapa_num = {
-        '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
-        '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
-    }
-    for d, uni in mapa_num.items():
-        texto = re.sub(r'\^' + d + r'(?!\d)', uni, texto)
-
-    # 7. Símbolos matemáticos Unicode
     mapa_simb = {
-        '\\times': '×', '\\div': '÷', '\\cdot': '·',
         '\\approx': '≈', '\\neq': '≠', '\\le': '≤', '\\leq': '≤',
         '\\ge': '≥', '\\geq': '≥', '\\pm': '±', '\\infty': '∞',
         '\\rightarrow': '→', '\\Rightarrow': '⇒',
         '\\pi': 'π', '\\alpha': 'α', '\\beta': 'β', '\\Delta': 'Δ',
     }
-    for k, v in mapa_simb.items():
-        texto = texto.replace(k, v)
-
-    # 8. Operadores relacionais ASCII → Unicode
-    # Ordem importa: <=> antes de >= e <=
-    texto = texto.replace('<=>', '⟺')
-    texto = texto.replace('=>',  '⇒')
-    texto = texto.replace('>=',  '≥')
-    texto = texto.replace('<=',  '≤')
-    texto = texto.replace('!=',  '≠')
-
-    # 9. Expoentes compostos com ponto médio que o Gemini gera
-    texto = texto.replace('^(m · n)', 'ᵐ·ⁿ')
-    texto = texto.replace('^(m · p)', 'ᵐ·ᵖ')
-    texto = texto.replace('^(n · p)', 'ⁿ·ᵖ')
-
-    # 10. raiz_N(...) → ᴺ√(...)  notação mais clara
-    texto = re.sub(r'raiz_([0-9]+)\(([^)]+)\)', r'\1√(\2)', texto)
-    texto = re.sub(r'raiz_([a-z])\(([^)]+)\)',  r'\1√(\2)', texto)
-    texto = re.sub(r'raiz\(([^)]+)\)',           r'√(\1)',    texto)
-
-    # 11. * como multiplicação → · (ponto médio Unicode)
-    # Substitui apenas quando o * está entre operandos (número, letra, parêntese)
-    # Não toca em ** (negrito Markdown) nem em * isolado de início de linha (bullet)
-    texto = re.sub(r'(?<=[0-9a-zA-Z²³⁰¹⁴⁵⁶⁷⁸⁹ⁿᵐᵏˣᵗ\)])\s*\*\s*(?=[0-9a-zA-Z\(])', ' · ', texto)
-
-    # 9. Remove separadores Markdown (---)
+    for k, v in mapa_simb.items(): texto = texto.replace(k, v)
+    texto = texto.replace('<=>', '⟺').replace('=>', '⇒').replace('>=', '≥').replace('<=', '≤').replace('!=', '≠')
+    texto = re.sub(r'(?<=[0-9a-zA-Z\)])\s*\*\s*(?=[0-9a-zA-Z\(])', ' · ', texto)
     texto = re.sub(r'^-{3,}$', '', texto.strip()) if re.match(r'^-{3,}$', texto.strip()) else texto
-
-    # 10. Remove itálico simples *texto* → texto (sem os asteriscos)
     texto = re.sub(r'(?<![*])\*([^*\n]+?)\*(?![*])', r'\1', texto)
-
-    # 11. Remove backticks de código inline
     texto = texto.replace('`', '')
-
     return texto
-
 
 # ── CLASSE PDF ─────────────────────────────────────────────────────────────────
 class PDFMaterial(FPDF):
     def __init__(self, disciplina: str, ano_escolar: str, assunto: str):
         super().__init__()
-        self.disciplina  = disciplina
-        self.ano_escolar = ano_escolar
-        self.assunto     = assunto
+        self.disciplina, self.ano_escolar, self.assunto = disciplina, ano_escolar, assunto
         if FONT_DIR:
-            self.add_font("DejaVu",  style="",  fname=FONT_DIR + "DejaVuSans.ttf")
-            self.add_font("DejaVu",  style="B", fname=FONT_DIR + "DejaVuSans-Bold.ttf")
-            self.add_font("DejaVuI", style="",  fname=FONT_DIR + "DejaVuSerif-Italic.ttf")
+            self.add_font("DejaVu",  style="",  fname=os.path.join(FONT_DIR, "DejaVuSans.ttf"))
+            self.add_font("DejaVu",  style="B", fname=os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"))
 
     def header(self):
         fonte = "DejaVu" if FONT_DIR else "helvetica"
         self.set_font(fonte, "B", 12)
         self.set_text_color(26, 42, 58)
-        self.cell(0, 6, "PLANO DE AULA E MATERIAL DIDÁTICO",
-                  align="C", new_x="LMARGIN", new_y="NEXT")
-        self.set_font(fonte, "B", 8.5)
+        self.cell(0, 10, "PLANO DE AULA E MATERIAL DIDÁTICO", align="C", ln=1)
+        self.set_font(fonte, "B", 9)
         self.set_text_color(41, 128, 185)
         subtitulo = f"{self.disciplina.upper()} | {self.ano_escolar} | Assunto: {self.assunto}"
-        self.cell(0, 5, subtitulo, align="C", new_x="LMARGIN", new_y="NEXT")
+        self.cell(0, 5, subtitulo, align="C", ln=1)
         self.ln(2)
         self.set_draw_color(41, 128, 185)
-        self.set_line_width(0.6)
-        self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
-        self.ln(4)
-        self.set_text_color(44, 62, 80)
+        self.set_line_width(0.5)
+        self.line(15, self.get_y(), 195, self.get_y())
+        self.ln(5)
 
     def footer(self):
-        fonte = "DejaVu" if FONT_DIR else "helvetica"
-        self.set_y(-14)
-        self.set_font(fonte, "", 8)
+        self.set_y(-15)
+        self.set_font("DejaVu" if FONT_DIR else "helvetica", "", 8)
         self.set_text_color(130, 130, 130)
         self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", align="R")
-
-
-# ── ESCREVER PARÁGRAFO COM **NEGRITO** INLINE ─────────────────────────────────
-def escrever_texto_formatado(pdf: FPDF, texto: str):
-    """
-    Escreve uma linha com suporte a **negrito** inline via pdf.write().
-    CORREÇÃO: removido o parâmetro recuo_x e o pdf.set_x() interno.
-    O posicionamento X deve ser feito pelo chamador ANTES de chamar esta função,
-    pois pdf.set_x() dentro dela resetaria o cursor e quebraria o alinhamento
-    do bullet nos itens de lista.
-    """
-    fonte = "DejaVu" if FONT_DIR else "helvetica"
-    partes = re.split(r'(\*\*.*?\*\*)', texto)
-    for parte in partes:
-        if not parte:
-            continue
-        if parte.startswith('**') and parte.endswith('**'):
-            pdf.set_font(fonte, "B", 10)
-            pdf.write(5.5, parte[2:-2])
-        else:
-            pdf.set_font(fonte, "", 10)
-            pdf.write(5.5, parte)
-    pdf.ln(6)
-
-
-# ── FRAÇÃO VERTICAL ──────────────────────────────────────────────────────────
-def desenhar_fracao(pdf: FPDF, numerador: str, denominador: str, fonte: str):
-    """Desenha fração vertical: numerador / linha / denominador."""
-    tam = 8
-    h   = 4.0
-    pdf.set_font(fonte, "", tam)
-    larg = max(pdf.get_string_width(numerador), pdf.get_string_width(denominador)) + 4
-    x0, y0 = pdf.get_x(), pdf.get_y()
-    pdf.set_xy(x0, y0)
-    pdf.cell(larg, h, numerador, align="C")
-    pdf.set_draw_color(44, 62, 80)
-    pdf.set_line_width(0.3)
-    pdf.line(x0, y0 + h, x0 + larg, y0 + h)
-    pdf.set_xy(x0, y0 + h)
-    pdf.cell(larg, h, denominador, align="C")
-    pdf.set_xy(x0 + larg + 1, y0)
-
-
-def escrever_com_fracoes(pdf: FPDF, texto: str, fonte: str):
-    """
-    Escreve texto com frações (num / den) renderizadas verticalmente.
-
-    CORREÇÃO:
-    Não converte frações que fazem parte de expoentes, como:
-        (81)^(3/4)
-        x^(5/8)
-        a^(m/n)
-
-    Nesses casos a fração pertence ao expoente e não deve ser desenhada
-    como fração vertical.
-    """
-
-    # Frações comuns: (a / b), mas NÃO quando vierem imediatamente após ^
-    padrao = re.compile(
-        r'(?<!\^)\(([^/()\n]+?)\s*/\s*([^/()\n]+?)\)'
-    )
-
-    cursor = 0
-
-    for m in padrao.finditer(texto):
-
-        # Texto antes da fração
-        antes = texto[cursor:m.start()]
-        if antes:
-            for trecho in re.split(r'(\*\*.*?\*\*)', antes):
-                if not trecho:
-                    continue
-                if trecho.startswith('**') and trecho.endswith('**'):
-                    pdf.set_font(fonte, "B", 10)
-                    pdf.write(5.5, trecho[2:-2])
-                else:
-                    pdf.set_font(fonte, "", 10)
-                    pdf.write(5.5, trecho)
-
-        # Desenha a fração
-        num = re.sub(r'\*+', '', m.group(1)).strip()
-        den = re.sub(r'\*+', '', m.group(2)).strip()
-
-        desenhar_fracao(pdf, num, den, fonte)
-
-        cursor = m.end()
-
-    # Texto restante
-    resto = texto[cursor:]
-    if resto:
-        for trecho in re.split(r'(\*\*.*?\*\*)', resto):
-            if not trecho:
-                continue
-            if trecho.startswith('**') and trecho.endswith('**'):
-                pdf.set_font(fonte, "B", 10)
-                pdf.write(5.5, trecho[2:-2])
-            else:
-                pdf.set_font(fonte, "", 10)
-                pdf.write(5.5, trecho)
-
-    pdf.ln(9)
-
 
 # ── COMPILADOR PDF ─────────────────────────────────────────────────────────────
 def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str) -> bytes:
     pdf = PDFMaterial(disciplina, ano_escolar, assunto)
     pdf.alias_nb_pages()
-    pdf.set_margins(15, 15, 15)
-    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_margins(15, 20, 15)
+    pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
-    W    = pdf.epw
     fonte = "DejaVu" if FONT_DIR else "helvetica"
-
+    renderer = PHCRenderer(pdf, font_name=fonte, base_size=10)
+    W = pdf.epw
     for linha_raw in texto_md.split('\n'):
         linha = sanitizar(linha_raw.rstrip())
         s = linha.strip()
-
         if not s:
-            pdf.ln(2)
-            continue
-
-        # Ignora separadores Markdown (---)
-        if re.match(r'^-{3,}$', s):
-            continue
-
-        # H1 — seção principal: fundo azul
-        if re.match(r'^# ', s):
-            texto_h = re.sub(r'^# ', '', s)
             pdf.ln(3)
+            continue
+        if s.startswith('# '):
+            pdf.ln(4)
             pdf.set_fill_color(41, 128, 185)
             pdf.set_font(fonte, "B", 11)
             pdf.set_text_color(255, 255, 255)
-            pdf.cell(W, 7.5, f"  {texto_h}", fill=True,
-                     new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(W, 8, f"  {s[2:]}", fill=True, ln=1)
             pdf.set_text_color(44, 62, 80)
-            pdf.ln(2.5)
-
-        # H2 — subseção: linha inferior azul
-        elif re.match(r'^## ', s):
-            texto_h = re.sub(r'^## ', '', s)
-            pdf.ln(2.5)
+            pdf.ln(3)
+        elif s.startswith('## '):
+            pdf.ln(3)
             pdf.set_font(fonte, "B", 10.5)
             pdf.set_text_color(26, 42, 58)
-            pdf.cell(W, 6, texto_h, new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(W, 7, s[3:], ln=1)
             pdf.set_draw_color(41, 128, 185)
-            pdf.set_line_width(0.3)
-            pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
-            pdf.set_text_color(44, 62, 80)
+            pdf.line(15, pdf.get_y(), 195, pdf.get_y())
             pdf.ln(2)
-
-        # H3/H4 — sub-subseção: texto azul bold
         elif re.match(r'^#{3,4}\s+', s):
-            texto_h = re.sub(r'^#{3,4}\s+', '', s)
-            pdf.ln(1.5)
+            pdf.ln(2)
             pdf.set_font(fonte, "B", 10)
             pdf.set_text_color(41, 128, 185)
-            pdf.multi_cell(W, 5.5, texto_h)
-            pdf.set_text_color(44, 62, 80)
-            pdf.ln(1)
-
-        # Item de lista (- ou *)
-        elif re.match(r'^[-*]\s+', s):
-            texto_item = re.sub(r'^[-*]\s+', '', s)
-            # Posiciona com recuo, escreve bullet, e deixa o cursor onde parou
-            pdf.set_x(pdf.l_margin + 3)
-            pdf.set_font(fonte, "", 10)
-            pdf.write(5.5, "• ")
-            # escrever_com_fracoes continua a partir do X atual (após o bullet)
-            escrever_com_fracoes(pdf, texto_item, fonte)
-
-        # Parágrafo comum
+            pdf.write(6, re.sub(r'^#{3,4}\s+', '', s))
+            pdf.ln(7)
         else:
-            pdf.set_x(pdf.l_margin)
-            escrever_com_fracoes(pdf, s, fonte)
+            renderer.render_line(linha)
+    return pdf.output(dest='S')
 
-    return bytes(pdf.output())
+# ── GEMINI E LOGICA DE GERAÇÃO ────────────────────────────────────────────────
+@st.cache_resource
+def get_gemini_client(api_key: str) -> genai.Client:
+    return genai.Client(api_key=api_key)
 
-
-# ── GERAÇÃO DE CONTEÚDO VIA GEMINI ────────────────────────────────────────────
-def gerar_conteudo_phc(client: genai.Client, disciplina: str,
-                       ano_escolar: str, assunto: str,
-                       codigo_bncc: str = "") -> str:
-    bloco_bncc = ""
-    if codigo_bncc.strip():
-        bloco_bncc = f"""
-    ALINHAMENTO CURRICULAR OBRIGATÓRIO:
-    - Alinhe este material à habilidade BNCC: **{codigo_bncc.strip().upper()}**.
-    - Cite o código e sua descrição na abertura da Seção 1.
-    - Todos os exercícios devem desenvolver especificamente essa habilidade.
-    """
-
+def gerar_conteudo_phc(client, disciplina, ano_escolar, assunto, codigo_bncc=""):
     prompt = f"""
-    Você é um professor especialista em Didática sob o referencial da
-    PEDAGOGIA HISTÓRICO-CRÍTICA e da TEORIA GRAMSCIANA DA HEGEMONIA.
+    Você é um Professor de Matemática e Pedagogo especializado na Pedagogia Histórico-Crítica (PHC).
+    Sua tarefa é elaborar um material didático completo para a disciplina de {disciplina},
+    voltado para o {ano_escolar}, sobre o assunto: {assunto}.
+    {"Habilidade BNCC: " + codigo_bncc if codigo_bncc else ""}
 
-    Elabore um material de aula completo e profundo para:
-    - Disciplina: {disciplina}
-    - Ano/Série: {ano_escolar}
-    - Conteúdo/Assunto: {assunto}
-    {bloco_bncc}
+    DIRETRIZES PEDAGÓGICAS (PHC):
+    1. O conhecimento científico deve ser tratado como saber sistematizado produzido historicamente.
+    2. A propriedade dos conceitos deve ser ferramenta de LEITURA CRÍTICA DA REALIDADE.
+    3. Entregue RIGOR TÉCNICO-CIENTÍFICO unido à CONSCIÊNCIA CRÍTICA.
 
-    ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
-    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido
-       historicamente pela humanidade para responder a necessidades concretas de sobrevivência,
-       trabalho e organização social.
-    2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA
-       REALIDADE, capacitando os sujeitos (especialmente das classes populares) para o AUTOGOVERNO,
-       a interpretação da sociedade e a tomada de decisão autônoma.
-    3. Rompa com a dualidade do ensino: entregue RIGOR TÉCNICO-CIENTÍFICO unido à CONSCIÊNCIA CRÍTICA.
-
-    Siga ESTRITAMENTE a estrutura abaixo:
-
+    ESTRUTURA:
     # 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO
-    - Apresente a origem social e a necessidade histórica deste conceito.
-    - Aponte a relevância para o mundo contemporâneo (trabalho, economia, política, cidadania).
-    - Definição rigorosa, formal e conceitual, com propriedades e leis.
-
     # 2. EXERCÍCIOS DE FIXAÇÃO E DOMÍNIO CONCEITUAL
-    - Questões de aplicação rigorosa dos conceitos e fórmulas.
-
     # 3. DESAFIOS DE LEITURA CRÍTICA E CONTRA-HEGEMONIA
-    - Questões contextualizadas em dados reais ou plausíveis da sociedade.
-    - Exija interpretação, argumentação e decisão crítica com base no conhecimento.
-
     # 4. GABARITO COMENTADO E PEDAGÓGICO
-    - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
 
-    REGRAS DE FORMATAÇÃO E NOTAÇÃO MATEMÁTICA (OBRIGATÓRIO):
-    - PROIBIDO: qualquer sintaxe LaTeX (\\frac, \\sqrt, \\cdot, $...$, $$...$$).
-    - Frações: notação linear  (a / b)  ou  a / b.
-    - Potências: notação Unicode direta (2², a³, aⁿ, 2¹², (1+i)ᵗ).
-      Para expoentes com 2+ dígitos, escreva o número por extenso: 2^12, 10^6.
-    - Radicais: √144 = 12,  ³√27 = 3,  √x.
-    - Multiplicação: ponto (·) ou asterisco (*).
-    - Use ## para subseções dentro de cada seção principal.
-    - Use **negrito** para termos técnicos e enunciados de questões.
-    - NÃO inclua saudações. Comece direto em '# 1. PRÁTICA SOCIAL...'.
+    FORMATAÇÃO MATEMÁTICA:
+    - PROIBIDO sintaxe LaTeX.
+    - Frações: (a / b).
+    - Potências: a^b ou a^(exp).
+    - Raízes: raiz(exp) ou 3√(exp).
+    - Use **negrito** para termos técnicos.
     """
-
-    config = types.GenerateContentConfig(
-        max_output_tokens=8192,
-        temperature=0.7
-    )
-
-    response = client.models.generate_content(
-        model='gemini-flash-latest',
-        contents=prompt,
-        config=config
-    )
+    config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
+    response = client.models.generate_content(model='gemini-1.5-flash', contents=prompt, config=config)
     return response.text
 
-
-# ── SIDEBAR ───────────────────────────────────────────────────────────────────
+# ── INTERFACE STREAMLIT ───────────────────────────────────────────────────────
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/teacher.png", width=70)
     st.title("Sobre o Autor")
     st.markdown("**Prof. Me. Eric Souza da Silva**")
-    st.caption(
-        "Licenciado em Matemática (UERJ), Mestre em Matemática pelo PROFMAT/UERJ. "
-        "Professor de Matemática das redes de Macaé e Casimiro de Abreu."
-    )
+    st.caption("Licenciado em Matemática (UERJ), Mestre pelo PROFMAT/UERJ.")
     st.divider()
-    st.subheader("📬 Contato & Suporte")
-    st.markdown("💬 **WhatsApp:** [(21) 97048-1891](https://wa.me/5521970481891)")
-    st.markdown("✉️ **E-mail:** [ericmatsouza@gmail.com](mailto:ericmatsouza@gmail.com)")
-    st.divider()
-    st.info("💡 Materiais didáticos fundamentados na Pedagogia Histórico-Crítica e Hegemonia Gramsciana.")
+    st.info("💡 Materiais baseados na Pedagogia Histórico-Crítica.")
 
-# ── INTERFACE PRINCIPAL ────────────────────────────────────────────────────────
 st.title("📚 Gerador de Aulas")
-
 st.markdown("""
 <div class="author-card">
   <div class="author-name">Desenvolvido por Prof. Me. Eric Souza da Silva</div>
-  <div class="author-desc">Plataforma pedagógica para elaboração de materiais didáticos multidisciplinares sob
-  a perspectiva da <b>Pedagogia Histórico-Crítica</b> e <b>Hegemonia Gramsciana</b>.</div>
-  <div>
-    <a href="https://wa.me/5521970481891" target="_blank" class="contact-badge contact-badge-wa">📱 (21) 97048-1891</a>
-    <a href="mailto:ericmatsouza@gmail.com" class="contact-badge">✉️ ericmatsouza@gmail.com</a>
-  </div>
+  <div class="author-desc">Plataforma pedagógica sob a perspectiva da PHC e Hegemonia Gramsciana.</div>
 </div>
 """, unsafe_allow_html=True)
 
 api_key = os.getenv("GEMINI_API_KEY", "")
 if not api_key:
-    api_key = st.text_input("🔑 Informe sua chave da API do Gemini para começar:", type="password")
+    api_key = st.text_input("🔑 Chave API Gemini:", type="password")
 
 col_disc, col_ano = st.columns(2)
-with col_disc:
-    disciplina  = st.text_input("Disciplina / Componente Curricular",
-                                placeholder="Ex: Matemática, História, Física...")
-with col_ano:
-    ano_escolar = st.text_input("Ano / Série",
-                                placeholder="Ex: 8º ano, 1º ano do EM...")
-
-assunto = st.text_input("Assunto / Conteúdo Específico",
-                        placeholder="Ex: Potenciação e Radiciação, Revolução Industrial...")
-
-codigo_bncc = st.text_input(
-    "🎯 Código de Habilidade BNCC (opcional)",
-    placeholder="Ex: EF07MA01, EF09CI08...",
-    help="Quando preenchido, o material será alinhado a esta habilidade da BNCC."
-)
+with col_disc: disciplina = st.text_input("Disciplina", placeholder="Ex: Matemática")
+with col_ano: ano_escolar = st.text_input("Ano / Série", placeholder="Ex: 9º ano")
+assunto = st.text_input("Assunto", placeholder="Ex: Potenciação")
+codigo_bncc = st.text_input("🎯 BNCC (opcional)")
 
 for chave in ("conteudo_md", "ultima_disciplina", "ultimo_ano", "ultimo_assunto"):
-    if chave not in st.session_state:
-        st.session_state[chave] = None if chave == "conteudo_md" else ""
+    if chave not in st.session_state: st.session_state[chave] = None if chave == "conteudo_md" else ""
 
-# ── BOTÃO DE GERAÇÃO ───────────────────────────────────────────────────────────
 if st.button("✨ Gerar Material Didático"):
-    if not api_key:
-        st.error("Por favor, informe a chave da API do Gemini para continuar.")
-    elif not disciplina or not ano_escolar or not assunto:
-        st.warning("Preencha a Disciplina, Ano/Série e o Assunto antes de gerar.")
+    if not api_key or not disciplina or not ano_escolar or not assunto:
+        st.warning("Preencha todos os campos.")
     else:
         try:
-            with st.spinner("🧠 Elaborando o plano de aula crítico via Gemini..."):
-                client      = get_gemini_client(api_key)
-                conteudo_md = gerar_conteudo_phc(client, disciplina, ano_escolar,
-                                                  assunto, codigo_bncc)
-            st.session_state.conteudo_md       = conteudo_md
-            st.session_state.ultima_disciplina = disciplina
-            st.session_state.ultimo_ano        = ano_escolar
-            st.session_state.ultimo_assunto    = assunto
-            st.success("✅ Conteúdo gerado! Revise o texto abaixo antes de exportar.")
+            with st.spinner("🧠 Gerando conteúdo..."):
+                client = get_gemini_client(api_key)
+                st.session_state.conteudo_md = gerar_conteudo_phc(client, disciplina, ano_escolar, assunto, codigo_bncc)
+                st.session_state.ultima_disciplina, st.session_state.ultimo_ano, st.session_state.ultimo_assunto = disciplina, ano_escolar, assunto
+            st.success("✅ Gerado!")
+        except Exception as e: st.error(f"❌ Erro: {e}")
 
-        except APIError as e:
-            erro = str(e).lower()
-            if "quota" in erro or "429" in erro or "rate" in erro:
-                st.error("⚠️ Limite de requisições atingido. Aguarde alguns minutos e tente novamente.")
-            elif "401" in erro or "403" in erro or "api_key" in erro or "authentication" in erro:
-                st.error("🔑 Chave de API inválida ou sem permissão. Verifique sua GEMINI_API_KEY.")
-            else:
-                st.error(f"❌ Erro de comunicação com a API Gemini: {e}")
-        except (ConnectionError, TimeoutError) as e:
-            st.error(f"🌐 Erro de rede: não foi possível conectar ao Gemini. ({e})")
-        except Exception as e:
-            st.error(f"❌ Erro inesperado: {e}")
-
-# ── PREVIEW + EXPORTAÇÕES ─────────────────────────────────────────────────────
 if st.session_state.conteudo_md:
-    disc = st.session_state.ultima_disciplina
-    ano  = st.session_state.ultimo_ano
-    ass  = st.session_state.ultimo_assunto
-    md   = st.session_state.conteudo_md
-
     st.divider()
-    st.subheader("👀 Preview do Conteúdo Gerado")
-    st.caption("Revise o texto abaixo. Quando estiver satisfeito, exporte nas opções abaixo.")
-
     with st.expander("📄 Visualizar texto completo", expanded=True):
-        st.markdown(md)
-
+        st.markdown(st.session_state.conteudo_md)
     st.divider()
-    st.subheader("📥 Exportar Material")
     col_pdf, col_md = st.columns(2)
-
     with col_pdf:
         try:
-            pdf_bytes = compilar_pdf(md, disc, ano, ass)
-            st.download_button(
-                label="🖨️ Baixar PDF Pronto",
-                data=pdf_bytes,
-                file_name=f"Aula_{disc}_{ass.replace(' ', '_')}.pdf",
-                mime="application/pdf"
-            )
-        except Exception as e:
-            st.error(f"❌ Erro na compilação do PDF: {e}")
-
+            pdf_bytes = compilar_pdf(st.session_state.conteudo_md, st.session_state.ultima_disciplina, st.session_state.ultimo_ano, st.session_state.ultimo_assunto)
+            st.download_button("🖨️ Baixar PDF", data=pdf_bytes, file_name=f"Aula_{st.session_state.ultima_disciplina}.pdf", mime="application/pdf")
+        except Exception as e: st.error(f"❌ Erro no PDF: {e}")
     with col_md:
-        st.download_button(
-            label="⬇️ Baixar Markdown (.md)",
-            data=md.encode("utf-8"),
-            file_name=f"Aula_{disc}_{ass.replace(' ', '_')}.md",
-            mime="text/markdown"
-        )
-        st.caption("Edite no Obsidian, Notion, Typora ou qualquer editor Markdown.")
+        st.download_button("⬇️ Baixar Markdown", data=st.session_state.conteudo_md.encode("utf-8"), file_name=f"Aula_{st.session_state.ultima_disciplina}.md", mime="text/markdown")
 
-# ── RODAPÉ ────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="footer">
-  © Desenvolvido por <b>Prof. Mestre Eric Souza da Silva</b><br>
-  Dúvidas ou suporte?
-  <a href="https://wa.me/5521970481891" target="_blank">WhatsApp</a> ou
-  <a href="mailto:ericmatsouza@gmail.com">E-mail</a>.
-</div>
-""", unsafe_allow_html=True)
+st.markdown('<div class="footer">© Prof. Eric Souza da Silva</div>', unsafe_allow_html=True)
