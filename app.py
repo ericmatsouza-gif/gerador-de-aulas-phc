@@ -23,12 +23,6 @@ st.markdown("""
 }
 .author-name { font-size: 1.1rem; font-weight: bold; color: #1a2a3a; margin-bottom: 4px; }
 .author-desc { font-size: 0.9rem; color: #555; margin-bottom: 10px; }
-.contact-badge {
-    display: inline-block; background-color: #eef7fc; color: #2980b9;
-    padding: 4px 10px; border-radius: 12px; font-size: 0.85rem;
-    font-weight: 600; margin-right: 8px; margin-top: 5px; text-decoration: none;
-}
-.contact-badge-wa { background-color: #e8f8ef; color: #27ae60; }
 .footer {
     margin-top: 50px; padding-top: 20px; border-top: 1px solid #e0e0e0;
     text-align: center; font-size: 0.85rem; color: #7f8c8d;
@@ -56,8 +50,14 @@ class PHCRenderer:
         except:
             self.pdf.set_font("helvetica", style, size)
 
-    def _write(self, text):
-        self._apply_style()
+    def _safe_write(self, text):
+        """Escreve texto tratando caracteres não suportados pela fonte atual."""
+        if not text: return
+        
+        # Se estiver usando helvetica, remove caracteres fora do range latin-1
+        if self.pdf.font_family.lower() == "helvetica":
+            text = text.encode('latin-1', 'replace').decode('latin-1')
+            
         if self.y_offset != 0:
             x, y = self.pdf.get_x(), self.pdf.get_y()
             self.pdf.set_y(y + self.y_offset)
@@ -68,7 +68,7 @@ class PHCRenderer:
 
     def draw_fraction(self, num_text, den_text):
         if self.in_exponent:
-            self._write(f"({num_text}/{den_text})")
+            self._safe_write(f"({num_text}/{den_text})")
             return
         x0, y0 = self.pdf.get_x(), self.pdf.get_y()
         old_mult = self.size_mult
@@ -144,14 +144,14 @@ class PHCRenderer:
                     if balance > 0: i += 1
                 content, i = text[start:i], i + 1
                 y_root = self.pdf.get_y()
-                self._write("√" if not prefix or prefix == "raiz" else prefix)
+                self._safe_write("√" if not prefix or prefix == "raiz" else prefix)
                 x_start = self.pdf.get_x()
                 self.render_span(content)
                 self.pdf.set_draw_color(44, 62, 80)
                 self.pdf.set_line_width(0.2)
                 self.pdf.line(x_start, y_root + 0.8, self.pdf.get_x(), y_root + 0.8)
                 continue
-            self._write(text[i])
+            self._safe_write(text[i])
             i += 1
 
     def render_line(self, text):
@@ -164,7 +164,7 @@ class PHCRenderer:
             indent = len(match_list.group(1)) * 2 + 5
             text = text[len(match_list.group(0)):]
             self.pdf.set_x(self.pdf.l_margin + indent - 5)
-            self._write(bullet + " ")
+            self._safe_write(bullet + " ")
             self.pdf.set_x(self.pdf.l_margin + indent)
         else:
             self.pdf.set_x(self.pdf.l_margin)
@@ -183,10 +183,20 @@ FONT_DIR = _localizar_fontes_dejavu()
 # ── SANITIZAÇÃO ───────────────────────────────────────────────────────────────
 def sanitizar(texto: str) -> str:
     if not texto: return ""
-    # Remove duplicatas de números longos (4+ dígitos) ou expressões matemáticas coladas
+    
+    # 1. Substituições de Segurança (Unicode -> ASCII/Latin1)
+    # Isso resolve o erro do caractere "—" (em-dash) em fontes helvetica
+    texto = texto.replace("—", "--")  # Em-dash
+    texto = texto.replace("–", "-")   # En-dash
+    texto = texto.replace("“", "\"").replace("”", "\"") # Aspas inteligentes
+    texto = texto.replace("‘", "'").replace("’", "'")   # Aspas simples inteligentes
+    texto = texto.replace("•", "-")   # Bullet point
+    
+    # 2. Remove duplicatas de números longos (4+ dígitos) ou expressões coladas
     texto = re.sub(r'(\d{4,})\1', r'\1', texto)
     texto = re.sub(r'([A-Za-z0-9=×+/\-^√()]{6,})\1', r'\1', texto)
     
+    # 3. Comandos LaTeX e outros
     texto = re.sub(r'\$+', '', texto)
     texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
     texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'\1√(\2)', texto)
@@ -197,6 +207,7 @@ def sanitizar(texto: str) -> str:
     texto = re.sub(r'\\(left|right|displaystyle|limits|nolimits)', '', texto)
     texto = re.sub(r'\\[a-zA-Z]+', '', texto)
     texto = re.sub(r'\^\{([^}]+)\}', r'^(\1)', texto)
+    
     mapa_simb = {
         '\\approx': '≈', '\\neq': '≠', '\\le': '≤', '\\leq': '≤',
         '\\ge': '≥', '\\geq': '≥', '\\pm': '±', '\\infty': '∞',
@@ -204,6 +215,7 @@ def sanitizar(texto: str) -> str:
         '\\pi': 'π', '\\alpha': 'α', '\\beta': 'β', '\\Delta': 'Δ',
     }
     for k, v in mapa_simb.items(): texto = texto.replace(k, v)
+    
     texto = texto.replace('<=>', '⟺').replace('=>', '⇒').replace('>=', '≥').replace('<=', '≤').replace('!=', '≠')
     texto = re.sub(r'(?<=[0-9a-zA-Z\)])\s*\*\s*(?=[0-9a-zA-Z\(])', ' · ', texto)
     texto = re.sub(r'^-{3,}$', '', texto.strip()) if re.match(r'^-{3,}$', texto.strip()) else texto
@@ -287,7 +299,7 @@ def get_gemini_client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key)
 
 def gerar_conteudo_phc(client, disciplina, ano_escolar, assunto, codigo_bncc=""):
-    prompt = f"Professor PHC. Matéria: {disciplina}, {ano_escolar}. Assunto: {assunto}. BNCC: {codigo_bncc}. Estrutura: # 1. Prática Social, # 2. Fixação, # 3. Leitura Crítica, # 4. Gabarito. Use (a/b) para frações e ^(exp) para potências."
+    prompt = f"Você é um Professor de Matemática especializado na Pedagogia Histórico-Crítica (PHC). Elabore um material didático completo para a disciplina de {disciplina}, voltado para o {ano_escolar}, sobre o assunto: {assunto}. BNCC: {codigo_bncc}. Estrutura: # 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA, # 2. EXERCÍCIOS DE FIXAÇÃO, # 3. DESAFIOS DE LEITURA CRÍTICA, # 4. GABARITO COMENTADO. Use (a/b) para frações e ^(exp) para potências. NÃO use LaTeX."
     config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
     response = client.models.generate_content(model='gemini-flash-latest', contents=prompt, config=config)
     return response.text
