@@ -132,7 +132,12 @@ def sanitizar(texto: str) -> str:
     for k, v in mapa_simb.items():
         texto = texto.replace(k, v)
 
-    # 8. Remove backticks de código inline
+    # 8. * como multiplicação → · (ponto médio Unicode)
+    # Substitui apenas quando o * está entre operandos (número, letra, parêntese)
+    # Não toca em ** (negrito Markdown) nem em * isolado de início de linha (bullet)
+    texto = re.sub(r'(?<=[0-9a-zA-Z²³⁰¹⁴⁵⁶⁷⁸⁹ⁿᵐᵏˣᵗ\)])\s*\*\s*(?=[0-9a-zA-Z\(])', ' · ', texto)
+
+    # 9. Remove backticks de código inline
     texto = texto.replace('`', '')
 
     return texto
@@ -168,13 +173,10 @@ class PDFMaterial(FPDF):
         self.set_text_color(44, 62, 80)
 
     def footer(self):
-        fonte_i = "DejaVuI" if FONT_DIR else "helvetica"
-        fonte   = "DejaVu"  if FONT_DIR else "helvetica"
+        fonte = "DejaVu" if FONT_DIR else "helvetica"
         self.set_y(-14)
-        self.set_font(fonte_i, "", 8)
-        self.set_text_color(130, 130, 130)
-        self.cell(0, 10, "Elaborado por Prof. Me. Eric Souza | PHC", align="L")
         self.set_font(fonte, "", 8)
+        self.set_text_color(130, 130, 130)
         self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", align="R")
 
 
@@ -199,6 +201,59 @@ def escrever_texto_formatado(pdf: FPDF, texto: str):
             pdf.set_font(fonte, "", 10)
             pdf.write(5.5, parte)
     pdf.ln(6)
+
+
+# ── FRAÇÃO VERTICAL ──────────────────────────────────────────────────────────
+def desenhar_fracao(pdf: FPDF, numerador: str, denominador: str, fonte: str):
+    """Desenha fração vertical: numerador / linha / denominador."""
+    tam = 8
+    h   = 4.0
+    pdf.set_font(fonte, "", tam)
+    larg = max(pdf.get_string_width(numerador), pdf.get_string_width(denominador)) + 4
+    x0, y0 = pdf.get_x(), pdf.get_y()
+    pdf.set_xy(x0, y0)
+    pdf.cell(larg, h, numerador, align="C")
+    pdf.set_draw_color(44, 62, 80)
+    pdf.set_line_width(0.3)
+    pdf.line(x0, y0 + h, x0 + larg, y0 + h)
+    pdf.set_xy(x0, y0 + h)
+    pdf.cell(larg, h, denominador, align="C")
+    pdf.set_xy(x0 + larg + 1, y0)
+
+
+def escrever_com_fracoes(pdf: FPDF, texto: str, fonte: str):
+    """Escreve texto com frações (num / den) renderizadas verticalmente."""
+    padrao = re.compile(r'\(([^/()\n]+?)\s*/\s*([^/()\n]+?)\)')
+    cursor = 0
+    for m in padrao.finditer(texto):
+        # Texto antes da fração
+        antes = texto[cursor:m.start()]
+        if antes:
+            for trecho in re.split(r'(\*\*.*?\*\*)', antes):
+                if not trecho:
+                    continue
+                if trecho.startswith('**') and trecho.endswith('**'):
+                    pdf.set_font(fonte, "B", 10)
+                    pdf.write(5.5, trecho[2:-2])
+                else:
+                    pdf.set_font(fonte, "", 10)
+                    pdf.write(5.5, trecho)
+        # Fração vertical
+        desenhar_fracao(pdf, m.group(1).strip(), m.group(2).strip(), fonte)
+        cursor = m.end()
+    # Texto restante após a última fração
+    resto = texto[cursor:]
+    if resto:
+        for trecho in re.split(r'(\*\*.*?\*\*)', resto):
+            if not trecho:
+                continue
+            if trecho.startswith('**') and trecho.endswith('**'):
+                pdf.set_font(fonte, "B", 10)
+                pdf.write(5.5, trecho[2:-2])
+            else:
+                pdf.set_font(fonte, "", 10)
+                pdf.write(5.5, trecho)
+    pdf.ln(9)
 
 
 # ── COMPILADOR PDF ─────────────────────────────────────────────────────────────
@@ -261,13 +316,13 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
             pdf.set_x(pdf.l_margin + 3)
             pdf.set_font(fonte, "", 10)
             pdf.write(5.5, "• ")
-            # escrever_texto_formatado continua a partir do X atual (após o bullet)
-            escrever_texto_formatado(pdf, texto_item)
+            # escrever_com_fracoes continua a partir do X atual (após o bullet)
+            escrever_com_fracoes(pdf, texto_item, fonte)
 
         # Parágrafo comum
         else:
             pdf.set_x(pdf.l_margin)
-            escrever_texto_formatado(pdf, s)
+            escrever_com_fracoes(pdf, s, fonte)
 
     return bytes(pdf.output())
 
