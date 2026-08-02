@@ -208,7 +208,7 @@ Atua em Educação Matemática, Tecnologias Digitais no Ensino, História da Edu
 
     st.divider()
 
-    st.info("💡 Aplicação para geração de materiais didáticos multidisciplinares.")
+    st.info("💡 Aplicação para geração de materiais didáticos multidisciplinares fundamentados na Pedagogia Histórico Crítica.")
 
 # --- INTERFACE PRINCIPAL ---
 st.title("📚 Gerador de Aulas")
