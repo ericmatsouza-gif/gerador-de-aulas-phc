@@ -219,7 +219,7 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
     return bytes(pdf.output())
 
 
-# ── GERAÇÃO DE CONTEÚDO VIA GEMINI OTIMIZADA PARA COTA GRATUITA ───────────────
+# ── GERAÇÃO DE CONTEÚDO DIRETA (SEM LOOP EXCESSIVO) ───────────────────────────
 def gerar_conteudo_phc(client: genai.Client, disciplina: str,
                        ano_escolar: str, assunto: str,
                        codigo_bncc: str = "") -> str:
@@ -268,7 +268,7 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     # 4. GABARITO COMENTADO E PEDAGÓGICO
     - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
 
-    REGRAS DE FORMATAÇÃO E NOTAÇÃO MATEMÁTICA DIDÁTICA (MUITO IMPORTANTE):
+    REGRAS DE FORMATAÇÃO E NOTAÇÃO MATEMÁTICA DIDÁTICA:
     - É STRICTLY PROIBIDO usar a sintaxe \\frac{{a}}{{b}} do LaTeX.
     - Para frações, use notação em linha limpa: (a / b) ou a / b. Exemplo: (a + b) / 2.
     - Para potências, use notação limpa Unicode (a², a³, aⁿ, aᵐ⁺ⁿ, 2⁶).
@@ -279,40 +279,18 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     - NÃO inclua saudações. Comece direto no título '# 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO'.
     """
 
-    # Modelos organizados com separação real de cotas
-    modelos = [
-        'gemini-flash-latest',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash',
-        'gemini-1.5-pro'
-    ]
-
-    # Configuração com limite de tokens para não estourar TPM (Tokens Por Minuto)
     config = types.GenerateContentConfig(
-        max_output_tokens=2500,
+        max_output_tokens=2000,
         temperature=0.7
     )
     
-    ultimo_erro = None
-    for modelo in modelos:
-        try:
-            response = client.models.generate_content(
-                model=modelo,
-                contents=prompt,
-                config=config
-            )
-            return response.text
-        except APIError as e:
-            msg_erro = str(e).upper()
-            if any(codigo in msg_erro for codigo in ["503", "UNAVAILABLE", "404", "NOT_FOUND", "429", "RESOURCE_EXHAUSTED", "QUOTA"]):
-                ultimo_erro = e
-                time.sleep(7)  # Aguarda 7 segundos para descarregar a janela de cota por minuto
-                continue
-            raise e
-            
-    if ultimo_erro:
-        raise ultimo_erro
-
+    # Executa apenas no modelo Flash principal
+    response = client.models.generate_content(
+        model='gemini-2.0-flash',
+        contents=prompt,
+        config=config
+    )
+    return response.text
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
