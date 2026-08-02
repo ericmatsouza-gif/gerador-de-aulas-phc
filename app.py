@@ -1,110 +1,3 @@
-import os
-import re
-import streamlit as st
-from google import genai
-from fpdf import FPDF
-
-# --- CONFIGURAÇÃO DA PÁGINA WEB ---
-st.set_page_config(
-    page_title="Gerador de Aulas",
-    page_icon="📚",
-    layout="centered"
-)
-
-# Estilização CSS customizada
-st.markdown("""
-    <style>
-    .stButton>button {
-        width: 100%;
-        background-color: #2980b9;
-        color: white;
-        font-weight: bold;
-        height: 3.2em;
-        border-radius: 8px;
-        border: none;
-        font-size: 16px;
-    }
-    .stButton>button:hover {
-        background-color: #1f6391;
-        color: white;
-    }
-    .author-card {
-        background-color: #f8f9fa;
-        border-left: 4px solid #2980b9;
-        padding: 15px;
-        border-radius: 6px;
-        margin-bottom: 25px;
-    }
-    .author-name {
-        font-size: 1.1rem;
-        font-weight: bold;
-        color: #1a2a3a;
-        margin-bottom: 4px;
-    }
-    .author-desc {
-        font-size: 0.9rem;
-        color: #555;
-        margin-bottom: 10px;
-    }
-    .contact-badge {
-        display: inline-block;
-        background-color: #eef7fc;
-        color: #2980b9;
-        padding: 4px 10px;
-        border-radius: 12px;
-        font-size: 0.85rem;
-        font-weight: 600;
-        margin-right: 8px;
-        margin-top: 5px;
-        text-decoration: none;
-    }
-    .contact-badge-wa {
-        background-color: #e8f8ef;
-        color: #27ae60;
-    }
-    .footer {
-        margin-top: 50px;
-        padding-top: 20px;
-        border-top: 1px solid #e0e0e0;
-        text-align: center;
-        font-size: 0.85rem;
-        color: #7f8c8d;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-
-# --- CLASSE PARA GERAÇÃO DO PDF ---
-class PDFMaterial(FPDF):
-    def __init__(self, disciplina, ano_escolar, assunto):
-        super().__init__()
-        self.disciplina = disciplina
-        self.ano_escolar = ano_escolar
-        self.assunto = assunto
-
-    def header(self):
-        self.set_font('Helvetica', 'B', 14)
-        self.set_text_color(26, 42, 58)
-        self.cell(0, 7, 'PLANO DE AULA E MATERIAL DIDÁTICO', align='C', new_x="LMARGIN", new_y="NEXT")
-        
-        self.set_font('Helvetica', 'B', 10)
-        self.set_text_color(41, 128, 185)
-        subtitulo = f"{self.disciplina.upper()} | {self.ano_escolar} | Assunto: {self.assunto}"
-        self.cell(0, 6, subtitulo, align='C', new_x="LMARGIN", new_y="NEXT")
-        
-        self.set_draw_color(41, 128, 185)
-        self.set_line_width(0.8)
-        self.line(15, self.get_y() + 2, 195, self.get_y() + 2)
-        self.ln(6)
-
-    def footer(self):
-        self.set_y(-15)
-        self.set_font('Helvetica', 'I', 8)
-        self.set_text_color(100, 100, 100)
-        self.cell(0, 10, 'Elaborado por Prof. Me. Eric Souza | PHC', align='L')
-        self.cell(0, 10, f'Página {self.page_no()}/{{nb}}', align='R')
-
-
 def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str) -> bytes:
     pdf = PDFMaterial(disciplina, ano_escolar, assunto)
     pdf.alias_nb_pages()
@@ -112,7 +5,9 @@ def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: st
     pdf.set_margins(15, 15, 15)
     pdf.set_auto_page_break(auto=True, margin=15)
     
-    # Limpeza de caracteres Markdown e de incompatibilidades de fonte
+    # Define a largura útil da página (210mm - 30mm de margens = 180mm)
+    largura_util = pdf.epw 
+    
     linhas = texto_md.split('\n')
     
     for linha in linhas:
@@ -121,155 +16,32 @@ def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: st
             pdf.ln(3)
             continue
             
-        # Trata caracteres especiais para compatibilidade com Latin-1 / Helvetica
+        # Tratamento de símbolos incompatíveis com a fonte Helvetica (Latin-1)
         linha_str = linha_str.replace('•', '-').replace('—', '-').replace('–', '-')
+        texto_limpo = linha_str.encode('latin-1', 'replace').decode('latin-1')
             
         # Títulos (#, ##, ###)
         if linha_str.startswith('#'):
-            texto_titulo = re.sub(r'^#+\s*', '', linha_str)
+            texto_titulo = re.sub(r'^#+\s*', '', texto_limpo)
             pdf.set_font('Helvetica', 'B', 12)
             pdf.set_text_color(26, 42, 58)
-            pdf.ln(4)
-            # encode('latin-1', 'replace') garante que nenhum símbolo unicode quebre a compilação
-            pdf.multi_cell(0, 6, texto_titulo.encode('latin-1', 'replace').decode('latin-1'))
+            pdf.ln(3)
+            pdf.multi_cell(largura_util, 6, texto_titulo, wrap_graphemes=True)
             pdf.ln(2)
+            
         # Tópicos (- ou *)
         elif linha_str.startswith('- ') or linha_str.startswith('* '):
-            texto_item = linha_str[2:].replace('**', '').replace('*', '')
+            texto_item = texto_limpo[2:].replace('**', '').replace('*', '')
             pdf.set_font('Helvetica', '', 10)
             pdf.set_text_color(44, 62, 80)
-            pdf.multi_cell(0, 5, f"- {texto_item}".encode('latin-1', 'replace').decode('latin-1'))
+            pdf.multi_cell(largura_util, 5, f"- {texto_item}", wrap_graphemes=True)
+            
+        # Parágrafos comuns
         else:
-            texto_paragrafo = linha_str.replace('**', '').replace('*', '')
+            texto_paragrafo = texto_limpo.replace('**', '').replace('*', '')
             pdf.set_font('Helvetica', '', 10)
             pdf.set_text_color(44, 62, 80)
-            pdf.multi_cell(0, 5, texto_paragrafo.encode('latin-1', 'replace').decode('latin-1'))
+            pdf.multi_cell(largura_util, 5, texto_paragrafo, wrap_graphemes=True)
             pdf.ln(1)
             
     return bytes(pdf.output())
-def gerar_conteudo_phc(api_key: str, disciplina: str, ano_escolar: str, assunto: str) -> str:
-    client = genai.Client(api_key=api_key)
-
-    prompt = f"""
-    Você é um professor especialista em Didática sob o referencial da 
-    PEDAGOGIA HISTÓRICO-CRÍTICA e da TEORIA GRAMSCIANA DA HEGEMONIA.
-
-    Elabore um material de aula completo para:
-    - Disciplina: {disciplina}
-    - Ano/Série: {ano_escolar}
-    - Conteúdo/Assunto: {assunto}
-
-    ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
-    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido historicamente pela humanidade.
-    2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA REALIDADE, capacitando para o AUTOGOVERNO e a AUTONOMIA.
-    3. Rompa com a dualidade do ensino: entregue o RIGOR TÉCNICO-CIENTÍFICO unido à CONSCIÊNCIA CRÍTICA.
-
-    Siga ESTRITAMENTE a estrutura abaixo:
-
-    1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO
-    - Apresente a origem social e a necessidade histórica deste conceito.
-    - Relevância para a compreensão do mundo contemporâneo.
-    - Definição rigorosa, formal e conceitual do conteúdo.
-
-    2. EXERCÍCIOS DE FIXAÇÃO E DOMÍNIO CONCEITUAL
-    - Questões de aplicação rigorosa dos conceitos.
-
-    3. DESAFIOS DE LEITURA CRÍTICA E CONTRA-HEGEMONIA
-    - Questões contextualizadas em dados reais ou plausíveis da sociedade.
-
-    4. GABARITO COMENTADO E PEDAGÓGICO
-    - Resolução passo a passo com justificativa técnica.
-    """
-
-    response = client.models.generate_content(
-        model='gemini-flash-latest',
-        contents=prompt,
-    )
-    return response.text
-
-
-# --- BARRA LATERAL (SIDEBAR) ---
-with st.sidebar:
-    st.image("https://img.icons8.com/color/96/teacher.png", width=70)
-    st.title("Sobre o Autor")
-    st.markdown("**Prof. Me. Eric Souza da Silva**")
-
-    st.caption("""
-Licenciado em Matemática (UERJ), Mestre em Matemática pelo PROFMAT/UERJ e especialista em Tecnologias Digitais Aplicadas ao Ensino (IFRJ).
-
-Professor de Matemática da Prefeitura de Macaé (Matrícula nº 48.836) e da Prefeitura de Casimiro de Abreu (Matrícula nº 15.035).
-
-Atua em Educação Matemática, Tecnologias Digitais no Ensino, História da Educação Matemática, Políticas Públicas, Educação Ambiental e Esquemas Colaborativos na Educação.
-    """)
-
-    st.divider()
-
-    st.subheader("📬 Contato & Suporte")
-    st.markdown("💬 **WhatsApp:** [(21) 97048-1891](https://wa.me/5521970481891)")
-    st.markdown("✉️ **E-mail:** [ericmatsouza@gmail.com](mailto:ericmatsouza@gmail.com)")
-
-    st.divider()
-
-    st.info("💡 Aplicação para geração de materiais didáticos multidisciplinares fundamentados na Pedagogia Histórico Crítica.")
-
-# --- INTERFACE PRINCIPAL ---
-st.title("📚 Gerador de Aulas")
-
-st.markdown("""
-    <div class="author-card">
-        <div class="author-name">👨‍🏫 Desenvolvido por Prof. Me. Eric Souza da Silva</div>
-        <div class="author-desc">Plataforma pedagógica para elaboração de materiais didáticos.</div>
-        <div>
-            <a href="https://wa.me/5521970481891" target="_blank" class="contact-badge contact-badge-wa">📱 WhatsApp: (21) 97048-1891</a>
-            <a href="mailto:ericmatsouza@gmail.com" class="contact-badge">✉️ ericmatsouza@gmail.com</a>
-        </div>
-    </div>
-""", unsafe_allow_html=True)
-
-api_key = os.getenv("GEMINI_API_KEY", "")
-
-if not api_key:
-    api_key = st.text_input("🔑 Informe sua chave da API do Gemini para começar:", type="password")
-
-col_disc, col_ano = st.columns(2)
-
-with col_disc:
-    disciplina = st.text_input("Disciplina / Componente Curricular", placeholder="Ex: Matemática, História, Física...")
-
-with col_ano:
-    ano_escolar = st.text_input("Ano / Série", placeholder="Ex: 6º ano, 1º ano do EM...")
-
-assunto = st.text_input("Assunto / Conteúdo Específico", placeholder="Ex: Potenciação e Radiciação, Revolução Industrial...")
-
-if st.button("✨ Gerar Material Didático (PDF)"):
-    if not api_key:
-        st.error("Por favor, informe a chave da API do Gemini para continuar.")
-    elif not disciplina or not ano_escolar or not assunto:
-        st.warning("Preencha a Disciplina, Ano/Série e o Assunto antes de gerar.")
-    else:
-        try:
-            with st.spinner("🧠 Elaborando o plano de aula crítico e compilando o PDF..."):
-                conteudo_md = gerar_conteudo_phc(api_key, disciplina, ano_escolar, assunto)
-                pdf_bytes = gerar_pdf_fpdf(conteudo_md, disciplina, ano_escolar, assunto)
-
-            st.success("🎉 Material gerado com sucesso!")
-
-            st.download_button(
-                label="📥 Baixar PDF Compilado",
-                data=pdf_bytes,
-                file_name=f"Aula_{disciplina}_{assunto.replace(' ', '_')}.pdf",
-                mime="application/pdf"
-            )
-
-            with st.expander("👀 Visualizar texto gerado"):
-                st.markdown(conteudo_md)
-
-        except Exception as e:
-            st.error(f"Ocorreu um erro ao processar a solicitação: {e}")
-
-st.markdown("""
-    <div class="footer">
-        © Desenvolvido por <b>Prof. Mestre Eric Souza da Silva</b> <br>
-        Dúvidas, sugestões ou suporte? Entre em contato via <a href="https://wa.me/5521970481891" target="_blank">WhatsApp</a> ou <a href="mailto:ericmatsouza@gmail.com">E-mail</a>.
-    </div>
-""", unsafe_allow_html=True)
