@@ -57,31 +57,50 @@ FONT_DIR = _localizar_fontes_dejavu()
 
 
 # ── GERADOR DE FRAÇÕES VERTICAIS VIA MATPLOTLIB & PILLOW ──────────────────────
+# ── GERADOR DE FRAÇÕES VERTICAIS VIA MATPLOTLIB & PILLOW (BLINDADO) ────────────
 def gerar_imagem_fracao(numerador: str, denominador: str, tamanho_fonte: int = 12) -> bytes:
     """
-    Gera uma imagem PNG transparente com a fração na vertical (numerador sobre denominador)
-    utilizando Matplotlib e Pillow.
+    Gera uma imagem PNG transparente com a fração na vertical.
+    Conta com fallback para evitar exceções de sintaxe LaTeX (ParseSyntaxException).
     """
+    # 1. Limpeza de caracteres que costumam quebrar a sintaxe do Matplotlib
+    num_clean = re.sub(r'[\{\}]', '', numerador).strip()
+    den_clean = re.sub(r'[\{\}]', '', denominador).strip()
+
     fig, ax = plt.subplots(figsize=(0.8, 0.5), dpi=300)
     fig.patch.set_alpha(0.0)
     ax.patch.set_alpha(0.0)
     ax.axis('off')
 
-    expressao = f"$\\frac{{{numerador}}}{{{denominador}}}$"
-    ax.text(0.5, 0.5, expressao, fontsize=tamanho_fonte, ha='center', va='center')
+    try:
+        # Tenta renderizar em notação LaTeX elegante
+        expressao = f"$\\frac{{{num_clean}}}{{{den_clean}}}$"
+        ax.text(0.5, 0.5, expressao, fontsize=tamanho_fonte, ha='center', va='center')
+        
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png', bbox_inches='tight', pad_inches=0.02, transparent=True)
+        plt.close(fig)
+    except Exception:
+        # FALLBACK DE SEGURANÇA: Se o LaTeX falhar, desenha como texto simples sem quebrar o app
+        plt.close(fig)
+        fig, ax = plt.subplots(figsize=(0.8, 0.5), dpi=300)
+        fig.patch.set_alpha(0.0)
+        ax.patch.set_alpha(0.0)
+        ax.axis('off')
+        
+        expressao_texto = f"{num_clean} / {den_clean}"
+        ax.text(0.5, 0.5, expressao_texto, fontsize=tamanho_fonte, ha='center', va='center')
+        
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png', bbox_inches='tight', pad_inches=0.02, transparent=True)
+        plt.close(fig)
 
-    buffer = io.BytesIO()
-    plt.savefig(buffer, format='png', bbox_inches='tight', pad_inches=0.02, transparent=True)
-    plt.close(fig)
     buffer.seek(0)
-    
-    # Processamento adicional de imagem via Pillow se necessário
     img = Image.open(buffer)
     out_buffer = io.BytesIO()
     img.save(out_buffer, format='PNG')
     out_buffer.seek(0)
     return out_buffer.getvalue()
-
 
 # ── CACHE DO CLIENTE GEMINI ────────────────────────────────────────────────────
 @st.cache_resource
