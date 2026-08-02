@@ -1,35 +1,31 @@
-import os
 import re
-from flask import Flask, render_template, request, send_file, flash, redirect, url_url
-import google.generativeai as genai
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.units import cm
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import streamlit as st
+from google import genai
+from fpdf import FPDF
 
-app = Flask(__name__)
-app.secret_key = "sua_chave_secreta_aqui"
-
-# Configuração da API do Gemini
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+# Configuração da página do Streamlit
+st.set_page_config(
+    page_title="Gerador de Aulas PHC",
+    page_icon="📚",
+    layout="centered"
+)
 
 # ------------------------------------------------------------------------------
-# 1. FUNÇÃO DE SANITIZAÇÃO REFORÇADA (Resolve acentos, \hat, $, potências e LaTeX)
+# 1. FUNÇÃO DE SANITIZAÇÃO (Resolve acentos, \hat, $, potências e LaTeX)
 # ------------------------------------------------------------------------------
 def sanitizar(texto: str) -> str:
-    """Limpa e formata textos vindos do Gemini para renderização segura no ReportLab."""
+    """Limpa e substitui marcações para renderização limpa no FPDF2."""
     if not texto:
         return ""
 
-    # 1. Tratamento de acentos/comandos LaTeX residuais específicos (\hat{n} -> ^n)
+    # Tratamento de acentos/comandos LaTeX residuais (\hat{n} -> ^n)
     texto = re.sub(r'\\hat\{([^}]+)\}', r'^\1', texto)
     texto = re.sub(r'\\hat\b', '^', texto)
 
-    # 2. Remoção de cifrões de formatação/LaTeX inline
+    # Remoção de cifrões de formatação
     texto = texto.replace('$', '')
 
-    # 3. Substituição de comandos matemáticos LaTeX estruturais
+    # Substituição de comandos matemáticos LaTeX
     texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
     texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'raiz_\1(\2)', texto)
     texto = re.sub(r'\\sqrt\{([^}]+)\}', r'raiz(\1)', texto)
@@ -37,29 +33,23 @@ def sanitizar(texto: str) -> str:
     texto = re.sub(r'\\(cdot|times)', ' * ', texto)
     texto = re.sub(r'\\div\b', ' / ', texto)
     texto = re.sub(r'\\(left|right|displaystyle|limits|nolimits)', '', texto)
-    texto = re.sub(r'\\[a-zA-Z]+', '', texto)  # Limpa qualquer outro comando \comando isolado
+    texto = re.sub(r'\\[a-zA-Z]+', '', texto)
 
-    # 4. Normalização de operadores comparativos
+    # Operadores comparativos
     texto = texto.replace('!=', '≠')
     texto = texto.replace('>=', '≥')
     texto = texto.replace('<=', '≤')
 
-    # 5. Potências com chaves -> parênteses ex: ^{mn} -> ^(mn)
+    # Potências com chaves -> parênteses ex: ^{mn} -> ^(mn)
     texto = re.sub(r'\^\{([^}]+)\}', r'^(\1)', texto)
 
-    # 6. Sobrescritos Unicode para expoentes isolados de 1 dígito
-    texto = re.sub(r'\^0(?!\d)', '⁰', texto)
-    texto = re.sub(r'\^1(?!\d)', '¹', texto)
-    texto = re.sub(r'\^2(?!\d)', '²', texto)
-    texto = re.sub(r'\^3(?!\d)', '³', texto)
-    texto = re.sub(r'\^4(?!\d)', '⁴', texto)
-    texto = re.sub(r'\^5(?!\d)', '⁵', texto)
-    texto = re.sub(r'\^6(?!\d)', '⁶', texto)
-    texto = re.sub(r'\^7(?!\d)', '⁷', texto)
-    texto = re.sub(r'\^8(?!\d)', '⁸', texto)
-    texto = re.sub(r'\^9(?!\d)', '⁹', texto)
+    # Sobrescritos isolados
+    sobrescritos = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', 
+                    '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹'}
+    for num, sub in sobrescritos.items():
+        texto = re.sub(rf'\^{num}(?!\d)', sub, texto)
 
-    # 7. Símbolos matemáticos e caracteres especiais
+    # Mapeamento de símbolos
     mapa = {
         r'\times': '×', r'\div': '÷', r'\cdot': '·',
         r'\approx': '≈', r'\neq': '≠', r'\le': '≤', r'\leq': '≤',
@@ -70,137 +60,115 @@ def sanitizar(texto: str) -> str:
     for latex, uni in mapa.items():
         texto = texto.replace(latex, uni)
 
-    # 8. Limpeza de formatações Markdown incompatíveis ou residuos
-    texto = texto.replace('`', '')
-
-    return texto.strip()
+    return texto.replace('`', '').strip()
 
 
 # ------------------------------------------------------------------------------
-# 2. GERAÇÃO DE PDF VIA REPORTLAB
+# 2. GERAÇÃO DE PDF COM FPDF2
 # ------------------------------------------------------------------------------
-def gerar_pdf(conteudo_limpo, caminho_saida):
-    doc = SimpleDocTemplate(
-        caminho_saida,
-        pagesize=letter,
-        rightMargin=1.5 * cm,
-        leftMargin=1.5 * cm,
-        topMargin=1.5 * cm,
-        bottomMargin=1.5 * cm,
-    )
+class PDFAtividade(FPDF):
+    def header(self):
+        self.set_font("Helvetica", "B", 14)
+        self.set_text_color(26, 54, 93)
+        self.cell(0, 10, "Atividade Didática", border=False, new_x="LMARGIN", new_y="NEXT", align="C")
+        self.ln(5)
 
-    styles = getSampleStyleSheet()
+    def footer(self):
+        self.set_y(-15)
+        self.set_font("Helvetica", "I", 8)
+        self.set_text_color(128, 128, 128)
+        self.cell(0, 10, f"Página {self.page_no()}", align="C")
 
-    # Estilos customizados para o PDF
-    estilo_titulo = ParagraphStyle(
-        "TituloPDF",
-        parent=styles["Heading1"],
-        fontName="Helvetica-Bold",
-        fontSize=16,
-        leading=20,
-        textColor=colors.HexColor("#1A365D"),
-        spaceAfter=10,
-    )
-
-    estilo_subtitulo = ParagraphStyle(
-        "SubtituloPDF",
-        parent=styles["Heading2"],
-        fontName="Helvetica-Bold",
-        fontSize=12,
-        leading=16,
-        textColor=colors.HexColor("#2B6CB0"),
-        spaceBefore=10,
-        spaceAfter=6,
-    )
-
-    estilo_corpo = ParagraphStyle(
-        "CorpoPDF",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=10,
-        leading=14,
-        textColor=colors.HexColor("#2D3748"),
-        spaceAfter=6,
-    )
-
-    story = []
-    linhas = conteudo_limpo.split("\n")
-
+def gerar_pdf(texto_limpo: str) -> bytes:
+    pdf = PDFAtividade()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    linhas = texto_limpo.split("\n")
+    
     for linha in linhas:
         linha_str = linha.strip()
         if not linha_str:
-            story.append(Spacer(1, 4))
+            pdf.ln(3)
             continue
-
+            
         if linha_str.startswith("# "):
-            texto_p = linha_str.replace("# ", "").strip()
-            story.append(Paragraph(f"<b>{texto_p}</b>", estilo_titulo))
-            story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#CBD5E0"), spaceAfter=10))
-        elif linha_str.startswith("## "):
-            texto_p = linha_str.replace("## ", "").strip()
-            story.append(Paragraph(f"<b>{texto_p}</b>", estilo_subtitulo))
-        elif linha_str.startswith("### "):
-            texto_p = linha_str.replace("### ", "").strip()
-            story.append(Paragraph(f"<b>{texto_p}</b>", estilo_subtitulo))
+            pdf.set_font("Helvetica", "B", 14)
+            pdf.set_text_color(26, 54, 93)
+            pdf.multi_cell(0, 8, linha_str.replace("# ", ""))
+            pdf.ln(2)
+        elif linha_str.startswith("## ") or linha_str.startswith("### "):
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.set_text_color(43, 108, 176)
+            pdf.multi_cell(0, 7, re.sub(r'^#{2,3}\s*', '', linha_str))
+            pdf.ln(2)
         else:
-            # Converte marcação simples de negrito Markdown (**) para HTML do ReportLab (<b>)
-            linha_formatada = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', linha_str)
-            story.append(Paragraph(linha_formatada, estilo_corpo))
-
-    doc.build(story)
+            pdf.set_font("Helvetica", "", 10)
+            pdf.set_text_color(45, 55, 72)
+            # Limpa negritos em markdown para exibição no FPDF simples
+            texto_sem_md = re.sub(r'\*\*(.*?)\*\*', r'\1', linha_str)
+            pdf.multi_cell(0, 6, texto_sem_md)
+            pdf.ln(1)
+            
+    return bytes(pdf.output())
 
 
 # ------------------------------------------------------------------------------
-# 3. ROTAS DA APLICAÇÃO FLASK
+# 3. INTERFACE STREAMLIT
 # ------------------------------------------------------------------------------
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        topico = request.form.get("topico")
-        nivel = request.form.get("nivel", "Ensino Médio")
+st.title("📚 Gerador de Aulas e Atividades PHC")
 
-        if not topico:
-            flash("Por favor, insira um tópico para a atividade.", "danger")
-            return redirect(url_for("index"))
+topico = st.text_input("Tópico da Aula / Atividade:", placeholder="Ex: Equações do 2º Grau, Leis de Newton...")
+nivel = st.selectbox("Nível de Ensino:", ["Ensino Fundamental II", "Ensino Médio", "EJA", "Ensino Superior"])
 
-        # Prompt blindado contra notações LaTeX / cifrões / \hat
-        prompt = f"""
-        Você é um assistente pedagógico especializado em criar materiais didáticos de Matemática e Física.
-        Crie uma lista de exercícios/atividade pedagógica sobre o tema: "{topico}", nível "{nivel}".
+if st.button("Gerar Atividade", type="primary"):
+    if not topico:
+        st.warning("Por favor, preencha o tópico da aula.")
+    else:
+        with st.spinner("Gerando conteúdo pedagógico..."):
+            try:
+                # Inicializa o cliente do novo SDK google-genai
+                client = genai.Client()
 
-        REGRAS RÍGIDAS DE FORMATAÇÃO:
-        1. NÃO USE sintaxe LaTeX em hipótese alguma (proibido o uso de $, \\frac, \\hat, \\text, \\sqrt, etc.).
-        2. NÃO utilize cifrões ($) no texto.
-        3. Para potências e expoentes, use apenas a notação simples de teclado com circunflexo. Exemplo: a^n, (1+i)^t, 2^10.
-        4. NUNCA escreva comandos como \\hat{{n}} ou a\\hat{{n}}n. Escreva simplesmente a^n.
-        5. Use marcadores Markdown simples (# para Título Principal, ## para Subtítulos, **texto** para negrito).
-        6. Organize a atividade em:
-           - Cabeçalho / Título
-           - Breve Resumo Teórico / Conceitos Chave
-           - Questões Propostas (com opções ou espaço para resposta)
-           - Gabarito Comentado no final.
-        """
+                prompt = f"""
+                Você é um assistente pedagógico especializado em criar materiais didáticos de Matemática e Física.
+                Crie uma lista de exercícios/atividade pedagógica sobre o tema: "{topico}", nível "{nivel}".
 
-        try:
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content(prompt)
+                REGRAS RÍGIDAS DE FORMATAÇÃO:
+                1. NÃO USE sintaxe LaTeX em hipótese alguma (proibido o uso de $, \\frac, \\hat, \\text, \\sqrt, etc.).
+                2. NÃO utilize cifrões ($) no texto.
+                3. Para potências e expoentes, use apenas a notação simples de teclado com circunflexo. Exemplo: a^n, (1+i)^t, 2^10.
+                4. NUNCA escreva comandos como \\hat{{n}} ou a\\hat{{n}}n. Escreva simplesmente a^n.
+                5. Use marcadores Markdown simples (# para Título Principal, ## para Subtítulos, **texto** para negrito).
+                6. Organize a atividade em:
+                   - Cabeçalho / Título
+                   - Breve Resumo Teórico / Conceitos Chave
+                   - Questões Propostas
+                   - Gabarito Comentado no final.
+                """
 
-            # Aplica a sanitização rigorosa ao texto retornado
-            texto_sanitizado = sanitizar(response.text)
+                # Chamada na API com a SDK google-genai
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                )
 
-            caminho_pdf = os.path.join("static", "atividade.pdf")
-            os.makedirs("static", exist_ok=True)
+                texto_sanitizado = sanitizar(response.text)
 
-            gerar_pdf(texto_sanitizado, caminho_pdf)
+                # Exibe a prévia na tela
+                st.markdown("---")
+                st.markdown(texto_sanitizado)
 
-            return send_file(caminho_pdf, as_attachment=True, download_name="atividade_didatica.pdf")
+                # Gera o arquivo PDF em memória
+                pdf_bytes = gerar_pdf(texto_sanitizado)
 
-        except Exception as e:
-            flash(f"Ocorreu um erro ao gerar a atividade: {str(e)}", "danger")
-            return redirect(url_for("index"))
+                # Botão de download
+                st.download_button(
+                    label="📄 Baixar Atividade em PDF",
+                    data=pdf_bytes,
+                    file_name="atividade_didatica.pdf",
+                    mime="application/pdf"
+                )
 
-    return render_template("index.html")
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
+            except Exception as e:
+                st.error(f"Erro ao gerar a atividade: {str(e)}")
