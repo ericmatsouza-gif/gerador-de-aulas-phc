@@ -113,7 +113,7 @@ def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: st
     pdf.set_margins(15, 15, 15)
     pdf.set_auto_page_break(auto=True, margin=15)
     
-    # Define a largura útil exata da página (evita erro de espaço horizontal)
+    # Define a largura útil exata da página
     largura_util = pdf.epw 
     
     linhas = texto_md.split('\n')
@@ -134,7 +134,7 @@ def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: st
             pdf.set_font('Helvetica', 'B', 12)
             pdf.set_text_color(26, 42, 58)
             pdf.ln(3)
-            pdf.multi_cell(largura_util, 6, texto_titulo, wrap_graphemes=True)
+            pdf.multi_cell(largura_util, 6, texto_titulo)  # <--- Removido wrap_graphemes=True
             pdf.ln(2)
             
         # Tópicos (- ou *)
@@ -142,14 +142,14 @@ def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: st
             texto_item = texto_limpo[2:].replace('**', '').replace('*', '')
             pdf.set_font('Helvetica', '', 10)
             pdf.set_text_color(44, 62, 80)
-            pdf.multi_cell(largura_util, 5, f"- {texto_item}", wrap_graphemes=True)
+            pdf.multi_cell(largura_util, 5, f"- {texto_item}")  # <--- Removido wrap_graphemes=True
             
         # Parágrafos comuns
         else:
             texto_paragrafo = texto_limpo.replace('**', '').replace('*', '')
             pdf.set_font('Helvetica', '', 10)
             pdf.set_text_color(44, 62, 80)
-            pdf.multi_cell(largura_util, 5, texto_paragrafo, wrap_graphemes=True)
+            pdf.multi_cell(largura_util, 5, texto_paragrafo)  # <--- Removido wrap_graphemes=True
             pdf.ln(1)
             
     return bytes(pdf.output())
