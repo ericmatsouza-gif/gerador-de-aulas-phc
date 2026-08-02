@@ -59,42 +59,67 @@ def get_gemini_client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
-# ── SANITIZAÇÃO DE TEXTO ───────────────────────────────────────────────────────
+# ── SANITIZAÇÃO E NORMALIZAÇÃO MATEMÁTICA UNICODE ─────────────────────────────
 def sanitizar(texto: str) -> str:
+    """
+    Transforma notações de programação e LaTeX em símbolos matemáticos Unicode
+    extremamente claros e legíveis para alunos do Ensino Fundamental/Médio.
+    """
     if not texto:
         return ""
 
+    # Remove cifrões do LaTeX
     texto = re.sub(r'\$+', '', texto)
+
+    # Dicionário de sobrescritos Unicode para letras e símbolos comuns
+    mapa_sobrescrito = {
+        '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+        '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+        '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
+        'n': 'ⁿ', 'm': 'ᵐ', 'k': 'ᵏ', 'x': 'ˣ', 't': 'ᵗ',
+        'a': 'ᵃ', 'b': 'ᵇ', 'p': 'ᵖ'
+    }
+
+    def para_sobrescrito(match):
+        conteudo = match.group(1)
+        res = []
+        for char in conteudo:
+            res.append(mapa_sobrescrito.get(char, char))
+        return "".join(res)
+
+    # 1. Converte potenciação a^{exp} ou a^exp para caracteres sobrescritos reais
+    texto = re.sub(r'\^\{([^}]+)\}', para_sobrescrito, texto)
+    texto = re.sub(r'\^([0-9nkmxtabp\+\-\(\)]+)', para_sobrescrito, texto)
+
+    # 2. Converte radiciação LaTeX e tipo raiz_n(x) para notação com Radical √
+    # raiz_n(x) ou \sqrt[n]{x} -> ⁿ√(x)
+    texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'^\1√(\2)', texto)
+    texto = re.sub(r'raiz_([a-zA-Z0-9]+)\(([^)]+)\)', r'^\1√(\2)', texto)
+    texto = re.sub(r'\^([a-zA-Z0-9]+)√', para_sobrescrito, texto) # ajusta o índice para sobrescrito
+    
+    # raiz(x) ou \sqrt{x} -> √(x)
+    texto = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', texto)
+    texto = re.sub(r'raiz\(([^)]+)\)', r'√(\1)', texto)
+
+    # 3. Tratamento de Comandos LaTeX Estruturais
     texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
-    texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'raiz_\1(\2)', texto)
-    texto = re.sub(r'\\sqrt\{([^}]+)\}',             r'raiz(\1)',      texto)
-    texto = re.sub(r'\\text\{([^}]+)\}',             r'\1',            texto)
-    texto = re.sub(r'\\(cdot|times)',   ' * ', texto)
-    texto = re.sub(r'\\div\b',          ' / ', texto)
+    texto = re.sub(r'\\text\{([^}]+)\}', r'\1', texto)
+    texto = re.sub(r'\\(cdot|times)', ' · ', texto)
+    texto = re.sub(r'\\div\b', ' ÷ ', texto)
     texto = re.sub(r'\\(left|right|displaystyle|limits|nolimits)', '', texto)
     texto = re.sub(r'\\[a-zA-Z]+', '', texto)
 
-    texto = re.sub(r'\^\{([^}]+)\}', r'^(\1)', texto)
-
-    texto = re.sub(r'\^0(?!\d)', '\u2070', texto)
-    texto = re.sub(r'\^1(?!\d)', '\u00b9', texto)
-    texto = re.sub(r'\^2(?!\d)', '\u00b2', texto)
-    texto = re.sub(r'\^3(?!\d)', '\u00b3', texto)
-    texto = re.sub(r'\^4(?!\d)', '\u2074', texto)
-    texto = re.sub(r'\^5(?!\d)', '\u2075', texto)
-    texto = re.sub(r'\^6(?!\d)', '\u2076', texto)
-    texto = re.sub(r'\^7(?!\d)', '\u2077', texto)
-    texto = re.sub(r'\^8(?!\d)', '\u2078', texto)
-    texto = re.sub(r'\^9(?!\d)', '\u2079', texto)
-
-    mapa = {
+    # 4. Operadores e Símbolos
+    texto = texto.replace('*', ' · ')
+    
+    mapa_simbolos = {
         r'\times': '×', r'\div': '÷', r'\cdot': '·',
         r'\approx': '≈', r'\neq': '≠', r'\le': '≤', r'\leq': '≤',
         r'\ge': '≥', r'\geq': '≥', r'\pm': '±', r'\infty': '∞',
         r'\rightarrow': '→', r'\Rightarrow': '⇒',
         r'\pi': 'π', r'\alpha': 'α', r'\beta': 'β', r'\Delta': 'Δ',
     }
-    for latex, uni in mapa.items():
+    for latex, uni in mapa_simbolos.items():
         texto = texto.replace(latex, uni)
 
     texto = texto.replace('`', '')
@@ -136,11 +161,8 @@ class PDFMaterial(FPDF):
         self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", align="R")
 
 
-# ── ESCREVER PARÁGRAFO COM NEGRITO INLINE CORRIGIDO ────────────────────────────
+# ── ESCREVER PARÁGRAFO COM NEGRITO INLINE ──────────────────────────────────────
 def escrever_texto_formatado(pdf: FPDF, texto: str, recuo_x: float = 0):
-    """
-    Renderiza texto no PDF tratando **negrito** de forma segura sem estourar margens.
-    """
     pdf.set_x(pdf.l_margin + recuo_x)
     partes = re.split(r'(\*\*.*?\*\*)', texto)
     
@@ -158,7 +180,7 @@ def escrever_texto_formatado(pdf: FPDF, texto: str, recuo_x: float = 0):
     pdf.ln(6)
 
 
-# ── COMPILADOR PDF CORRIGIDO ───────────────────────────────────────────────────
+# ── COMPILADOR PDF ─────────────────────────────────────────────────────────────
 def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str) -> bytes:
     pdf = PDFMaterial(disciplina, ano_escolar, assunto)
     pdf.alias_nb_pages()
@@ -238,7 +260,7 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     """
 
     prompt = f"""
-    Você é um professor especialista em Didática de todas as disciplinas sob o referencial da
+    Você é um professor especialista em Didática sob o referencial da
     PEDAGOGIA HISTÓRICO-CRÍTICA e da TEORIA GRAMSCIANA DA HEGEMONIA.
 
     Elabore um material de aula completo e profundo para:
@@ -248,7 +270,7 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     {bloco_bncc}
 
     ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
-    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido
+    1. O conhecimento científico/escolar deve ser tratado como um saber systematizado, produzido
        historicamente pela humanidade para responder a necessidades concretas de sobrevivência,
        trabalho e organização social.
     2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA
@@ -273,14 +295,14 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     # 4. GABARITO COMENTADO E PEDAGÓGICO
     - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
 
-    REGRAS RÍGIDAS DE FORMATAÇÃO — LEIA COM ATENÇÃO:
-    - É PROIBIDO o uso de qualquer cifrão ($ ou $$).
-    - É PROIBIDO o uso de comandos LaTeX (\\frac, \\sqrt, \\cdot, \\wedge etc.).
-    - Escreva expressões matemáticas com notação de teclado simples:
-      * Potências gerais: a^n  (Ex: 2^10, (1,10)^t). Para quadrado/cubo: ² e ³.
-      * Radiciação: raiz(x) ou raiz_n(x)  (Ex: raiz(144), raiz_3(27)).
-      * Frações: numerador / denominador  (Ex: 5 / 2).
-      * Multiplicação: *
+    REGRAS RÍGIDAS DE FORMATAÇÃO E NOTAÇÃO MATEMÁTICA DIDÁTICA:
+    - É PROIBIDO o uso de códigos de programação como `a^n`, `a^(m+n)` ou `raiz_n(a)`.
+    - Escreva equações matemáticas de forma Clara e Direta para alunos do ensino básico:
+      * Use caracteres de expoente Unicode: aⁿ, aᵐ⁺ⁿ, aᵐ⁻ⁿ, aᵐ⁻ⁿ, a², a³, 2ⁿ, (1,10)ᵗ.
+      * Use símbolos de radical Unicode reais: √x, ³√x, ⁿ√a. Exemplo: ³√27 = 3, √(144) = 12.
+      * Multiplicação deve ser representada sempre pelo ponto centrado ( · ). Exemplo: a · b.
+      * Frações simples devem ser escritas como: a / b ou (a + b) / c.
+    - É PROIBIDO o uso de qualquer cifrão ($ ou $$) ou sintaxe LaTeX (como \\frac, \\sqrt, \\cdot).
     - Use ## para subseções dentro de cada seção principal.
     - Use **negrito** para termos técnicos, nomes de propriedades e enunciados de questões.
     - NÃO inclua saudações nem introdução. Comece direto na Seção 1.
@@ -400,7 +422,6 @@ if st.session_state.conteudo_md:
     col_pdf, col_md = st.columns(2)
 
     with col_pdf:
-        # Pre-compilação do PDF para evitar que o clique no botão resete a tela no Streamlit
         try:
             pdf_bytes = compilar_pdf(md, disc, ano, ass)
             st.download_button(
