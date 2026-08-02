@@ -5,6 +5,7 @@ from google import genai
 from google.genai.errors import APIError
 from fpdf import FPDF
 from google.genai import types
+from renderer_phc import PHCRenderer
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerador de Aulas", page_icon="📚", layout="centered")
@@ -41,6 +42,7 @@ def _localizar_fontes_dejavu() -> str:
     paths = [
         "/usr/share/fonts/truetype/dejavu/",
         "/usr/share/fonts/dejavu/",
+        "/usr/local/share/fonts/",
     ]
     for p in paths:
         if os.path.isfile(os.path.join(p, "DejaVuSans.ttf")):
@@ -49,157 +51,26 @@ def _localizar_fontes_dejavu() -> str:
 
 FONT_DIR = _localizar_fontes_dejavu()
 
-# ── RENDERIZADOR ROBUSTO (PHCRenderer) ─────────────────────────────────────────
-class PHCRenderer:
-    """
-    Renderizador extensível para documentos pedagógicos.
-    Substitui a abordagem baseada apenas em regex por um processador de fluxo.
-    """
-    def __init__(self, pdf, font_name="DejaVu", base_size=10):
-        self.pdf = pdf
-        self.font_name = font_name
-        self.base_size = base_size
-        self.line_height = 6.0
-        self.bold = False
-        self.size_mult = 1.0
-        self.y_offset = 0
-        self.in_exponent = False
-        
-    def _apply_style(self):
-        style = "B" if self.bold else ""
-        size = self.base_size * self.size_mult
-        self.pdf.set_font(self.font_name, style, size)
-
-    def _write(self, text):
-        self._apply_style()
-        if self.y_offset != 0:
-            x, y = self.pdf.get_x(), self.pdf.get_y()
-            self.pdf.set_y(y + self.y_offset)
-            self.pdf.write(self.line_height, text)
-            self.pdf.set_xy(self.pdf.get_x(), y)
-        else:
-            self.pdf.write(self.line_height, text)
-
-    def draw_fraction(self, num_text, den_text):
-        if self.in_exponent:
-            self._write(f"({num_text}/{den_text})")
-            return
-
-        x0, y0 = self.pdf.get_x(), self.pdf.get_y()
-        old_mult = self.size_mult
-        self.size_mult *= 0.85
-        self._apply_style()
-        
-        w_num = self.pdf.get_string_width(num_text)
-        w_den = self.pdf.get_string_width(den_text)
-        w_frac = max(w_num, w_den) + 2
-        h_cell = self.line_height * 0.7
-        
-        self.pdf.set_xy(x0 + (w_frac - w_num)/2, y0 - h_cell/2 - 0.5)
-        self.pdf.write(h_cell, num_text)
-        
-        self.pdf.set_draw_color(44, 62, 80)
-        self.pdf.set_line_width(0.2)
-        self.pdf.line(x0, y0 + self.line_height/2, x0 + w_frac, y0 + self.line_height/2)
-        
-        self.pdf.set_xy(x0 + (w_frac - w_den)/2, y0 + h_cell/2 + 0.5)
-        self.pdf.write(h_cell, den_text)
-        
-        self.pdf.set_xy(x0 + w_frac + 1, y0)
-        self.size_mult = old_mult
-        self._apply_style()
-
-    def render_span(self, text):
-        i = 0
-        while i < len(text):
-            if text.startswith("**", i):
-                self.bold = not self.bold
-                i += 2
-                continue
-            
-            if text[i] == "^":
-                i += 1
-                content = ""
-                if i < len(text) and text[i] == "(":
-                    i += 1
-                    balance = 1
-                    start = i
-                    while i < len(text) and balance > 0:
-                        if text[i] == "(": balance += 1
-                        elif text[i] == ")": balance -= 1
-                        if balance > 0: i += 1
-                    content = text[start:i]
-                    i += 1
-                else:
-                    start = i
-                    while i < len(text) and (text[i].isalnum() or text[i] in "+-"):
-                        i += 1
-                    content = text[start:i]
-                
-                old_mult, old_y, old_exp = self.size_mult, self.y_offset, self.in_exponent
-                self.size_mult *= 0.7
-                self.y_offset -= 2.5
-                self.in_exponent = True
-                self.render_span(content)
-                self.size_mult, self.y_offset, self.in_exponent = old_mult, old_y, old_exp
-                continue
-
-            if text[i] == "(":
-                balance, j, slash_pos = 1, i + 1, -1
-                while j < len(text) and balance > 0:
-                    if text[j] == "(": balance += 1
-                    elif text[j] == ")": balance -= 1
-                    elif text[j] == "/" and balance == 1: slash_pos = j
-                    if balance > 0: j += 1
-                if slash_pos != -1:
-                    num, den = text[i+1:slash_pos].strip(), text[slash_pos+1:j].strip()
-                    self.draw_fraction(num, den)
-                    i = j + 1
-                    continue
-            
-            match_raiz = re.match(r'(?:raiz|\d*√)\(', text[i:])
-            if match_raiz:
-                prefix = match_raiz.group(0)[:-1]
-                i += len(match_raiz.group(0))
-                balance, start = 1, i
-                while i < len(text) and balance > 0:
-                    if text[i] == "(": balance += 1
-                    elif text[i] == ")": balance -= 1
-                    if balance > 0: i += 1
-                content, i = text[start:i], i + 1
-                y_root = self.pdf.get_y()
-                self._write("√" if not prefix or prefix == "raiz" else prefix)
-                x_start = self.pdf.get_x()
-                self.render_span(content)
-                self.pdf.set_draw_color(44, 62, 80)
-                self.pdf.set_line_width(0.2)
-                self.pdf.line(x_start, y_root + 0.8, self.pdf.get_x(), y_root + 0.8)
-                continue
-
-            self._write(text[i])
-            i += 1
-
-    def render_line(self, text):
-        if not text.strip():
-            self.pdf.ln(self.line_height)
-            return
-        match_list = re.match(r'^(\s*)([-*•]|\d+\.)\s+', text)
-        if match_list:
-            bullet = match_list.group(2)
-            indent = len(match_list.group(1)) * 2 + 5
-            text = text[len(match_list.group(0)):]
-            self.pdf.set_x(self.pdf.l_margin + indent - 5)
-            self._write(bullet + " ")
-            self.pdf.set_x(self.pdf.l_margin + indent)
-        else:
-            self.pdf.set_x(self.pdf.l_margin)
-        self.render_span(text)
-        self.pdf.ln(self.line_height + 2)
-
-# ── SANITIZAÇÃO ───────────────────────────────────────────────────────────────
+# ── SANITIZAÇÃO MELHORADA ─────────────────────────────────────────────────────
 def sanitizar(texto: str) -> str:
     if not texto: return ""
+    
+    # 1. Remove duplicatas geradas por falhas do LLM (ex: 200200 toneladas)
+    # Tenta encontrar números repetidos colados
+    texto = re.sub(r'(\d+)\1', r'\1', texto)
+    
+    # 2. Remove repetições de expressões matemáticas coladas
+    # Ex: P=P0×2tP=P0​×2t
+    texto = re.sub(r'([A-Za-z0-9=×+/\-^√()]+)\1', r'\1', texto)
+
+    # 3. Normaliza caracteres Unicode problemáticos
+    # Substitui travessão longo por hífen longo ou normal se a fonte falhar
+    # Mas com DejaVu o travessão deve funcionar. Se falhar, o renderizador PHC trata.
+    
+    # 4. Remove cifrões LaTeX
     texto = re.sub(r'\$+', '', texto)
+    
+    # 5. Comandos LaTeX estruturais
     texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
     texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'\1√(\2)', texto)
     texto = re.sub(r'\\sqrt\{([^}]+)\}',             r'raiz(\1)',     texto)
@@ -208,7 +79,11 @@ def sanitizar(texto: str) -> str:
     texto = re.sub(r'\\div\b',          ' / ',  texto)
     texto = re.sub(r'\\(left|right|displaystyle|limits|nolimits)', '', texto)
     texto = re.sub(r'\\[a-zA-Z]+', '', texto)
+    
+    # 6. Potências: Converte chaves para parênteses
     texto = re.sub(r'\^\{([^}]+)\}', r'^(\1)', texto)
+    
+    # 7. Símbolos matemáticos Unicode
     mapa_simb = {
         '\\approx': '≈', '\\neq': '≠', '\\le': '≤', '\\leq': '≤',
         '\\ge': '≥', '\\geq': '≥', '\\pm': '±', '\\infty': '∞',
@@ -216,11 +91,18 @@ def sanitizar(texto: str) -> str:
         '\\pi': 'π', '\\alpha': 'α', '\\beta': 'β', '\\Delta': 'Δ',
     }
     for k, v in mapa_simb.items(): texto = texto.replace(k, v)
+    
+    # 8. Operadores relacionais
     texto = texto.replace('<=>', '⟺').replace('=>', '⇒').replace('>=', '≥').replace('<=', '≤').replace('!=', '≠')
+    
+    # 9. Multiplicação
     texto = re.sub(r'(?<=[0-9a-zA-Z\)])\s*\*\s*(?=[0-9a-zA-Z\(])', ' · ', texto)
+    
+    # 10. Markdown básico
     texto = re.sub(r'^-{3,}$', '', texto.strip()) if re.match(r'^-{3,}$', texto.strip()) else texto
     texto = re.sub(r'(?<![*])\*([^*\n]+?)\*(?![*])', r'\1', texto)
     texto = texto.replace('`', '')
+    
     return texto
 
 # ── CLASSE PDF ─────────────────────────────────────────────────────────────────
@@ -231,6 +113,10 @@ class PDFMaterial(FPDF):
         if FONT_DIR:
             self.add_font("DejaVu",  style="",  fname=os.path.join(FONT_DIR, "DejaVuSans.ttf"))
             self.add_font("DejaVu",  style="B", fname=os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"))
+        else:
+            # Se não encontrar DejaVu, tenta carregar fontes do sistema que suportem Unicode
+            # Fallback para helvetica (mas avisando no log)
+            print("AVISO: Fontes DejaVu não encontradas. Usando Helvetica.")
 
     def header(self):
         fonte = "DejaVu" if FONT_DIR else "helvetica"
@@ -249,7 +135,8 @@ class PDFMaterial(FPDF):
 
     def footer(self):
         self.set_y(-15)
-        self.set_font("DejaVu" if FONT_DIR else "helvetica", "", 8)
+        fonte = "DejaVu" if FONT_DIR else "helvetica"
+        self.set_font(fonte, "", 8)
         self.set_text_color(130, 130, 130)
         self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", align="R")
 
@@ -260,15 +147,19 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
     pdf.set_margins(15, 20, 15)
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
+    
     fonte = "DejaVu" if FONT_DIR else "helvetica"
     renderer = PHCRenderer(pdf, font_name=fonte, base_size=10)
     W = pdf.epw
+    
     for linha_raw in texto_md.split('\n'):
         linha = sanitizar(linha_raw.rstrip())
         s = linha.strip()
+        
         if not s:
             pdf.ln(3)
             continue
+            
         if s.startswith('# '):
             pdf.ln(4)
             pdf.set_fill_color(41, 128, 185)
@@ -289,13 +180,14 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
             pdf.ln(2)
             pdf.set_font(fonte, "B", 10)
             pdf.set_text_color(41, 128, 185)
-            pdf.write(6, re.sub(r'^#{3,4}\s+', '', s))
-            pdf.ln(7)
+            # Renderiza o título H3 com o PHCRenderer para suportar matemática se houver
+            renderer.render_line(re.sub(r'^#{3,4}\s+', '**', s) + '**')
         else:
             renderer.render_line(linha)
+            
     return pdf.output(dest='S')
 
-# ── GEMINI E LOGICA DE GERAÇÃO ────────────────────────────────────────────────
+# ── LOGICA DE UI (STREAMLIT) ──────────────────────────────────────────────────
 @st.cache_resource
 def get_gemini_client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key)
@@ -303,14 +195,8 @@ def get_gemini_client(api_key: str) -> genai.Client:
 def gerar_conteudo_phc(client, disciplina, ano_escolar, assunto, codigo_bncc=""):
     prompt = f"""
     Você é um Professor de Matemática e Pedagogo especializado na Pedagogia Histórico-Crítica (PHC).
-    Sua tarefa é elaborar um material didático completo para a disciplina de {disciplina},
-    voltado para o {ano_escolar}, sobre o assunto: {assunto}.
+    Elabore um material didático para {disciplina}, {ano_escolar}, sobre: {assunto}.
     {"Habilidade BNCC: " + codigo_bncc if codigo_bncc else ""}
-
-    DIRETRIZES PEDAGÓGICAS (PHC):
-    1. O conhecimento científico deve ser tratado como saber sistematizado produzido historicamente.
-    2. A propriedade dos conceitos deve ser ferramenta de LEITURA CRÍTICA DA REALIDADE.
-    3. Entregue RIGOR TÉCNICO-CIENTÍFICO unido à CONSCIÊNCIA CRÍTICA.
 
     ESTRUTURA:
     # 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO
@@ -318,25 +204,25 @@ def gerar_conteudo_phc(client, disciplina, ano_escolar, assunto, codigo_bncc="")
     # 3. DESAFIOS DE LEITURA CRÍTICA E CONTRA-HEGEMONIA
     # 4. GABARITO COMENTADO E PEDAGÓGICO
 
-    FORMATAÇÃO MATEMÁTICA:
-    - PROIBIDO sintaxe LaTeX.
-    - Frações: (a / b).
-    - Potências: a^b ou a^(exp).
-    - Raízes: raiz(exp) ou 3√(exp).
-    - Use **negrito** para termos técnicos.
+    REGRAS CRÍTICAS:
+    - NÃO repita termos ou números colados (ex: 200200).
+    - Use notação (a / b) para frações.
+    - Use ^(exp) para potências.
+    - Use raiz(exp) para raízes.
+    - Foco em rigor técnico e consciência crítica.
     """
     config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
-    response = client.models.generate_content(model='gemini-flash-latest', contents=prompt, config=config)
+    response = client.models.generate_content(model='gemini-1.5-flash', contents=prompt, config=config)
     return response.text
 
-# ── INTERFACE STREAMLIT ───────────────────────────────────────────────────────
+# --- Interface Principal ---
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/teacher.png", width=70)
     st.title("Sobre o Autor")
     st.markdown("**Prof. Me. Eric Souza da Silva**")
     st.caption("Licenciado em Matemática (UERJ), Mestre pelo PROFMAT/UERJ.")
     st.divider()
-    st.info("💡 Materiais baseados na Pedagogia Histórico-Crítica.")
+    st.info("💡 Materiais baseados na PHC.")
 
 st.title("📚 Gerador de Aulas")
 st.markdown("""
