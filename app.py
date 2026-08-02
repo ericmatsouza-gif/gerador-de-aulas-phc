@@ -1,6 +1,7 @@
 import os
 import re
 import io
+import time
 import streamlit as st
 from google import genai
 from google.genai.errors import APIError
@@ -293,10 +294,11 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
             )
             return response.text
         except APIError as e:
-            msg_erro = str(e).upper()
-            if any(codigo in msg_erro for codigo in ["503", "UNAVAILABLE", "404", "NOT_FOUND", "429", "RESOURCE_EXHAUSTED", "QUOTA"]):
-                ultimo_erro = e
-                continue
+    msg_erro = str(e).upper()
+    if any(codigo in msg_erro for codigo in ["503", "UNAVAILABLE", "404", "NOT_FOUND", "429", "RESOURCE_EXHAUSTED", "QUOTA"]):
+        ultimo_erro = e
+        time.sleep(2)  # Dá uma pausa de 2 segundos antes de tentar o próximo modelo
+        continue
             raise e
             
     if ultimo_erro:
