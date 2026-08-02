@@ -242,7 +242,7 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     {bloco_bncc}
 
     ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
-    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido
+    1. O conhecimento científico/escolar deve ser tratado como um saber systematizado, produzido
        historicamente pela humanidade para responder a necessidades concretas de sobrevivência,
        trabalho e organização social.
     2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA
@@ -280,11 +280,25 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     - NÃO inclua saudações. Comece direto no título '# 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO'.
     """
 
-    response = client.models.generate_content(
-        model='gemini-flash-latest',
-        contents=prompt,
-    )
-    return response.text
+    # Lista de modelos alternativos em ordem de preferência
+    modelos = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
+    
+    ultimo_erro = None
+    for modelo in modelos:
+        try:
+            response = client.models.generate_content(
+                model=modelo,
+                contents=prompt,
+            )
+            return response.text
+        except APIError as e:
+            if "503" in str(e) or "UNAVAILABLE" in str(e):
+                ultimo_erro = e
+                continue # Tenta o próximo modelo se o atual estiver 503
+            raise e
+            
+    if ultimo_erro:
+        raise ultimo_erro
 
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
