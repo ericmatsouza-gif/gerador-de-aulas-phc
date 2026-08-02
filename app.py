@@ -106,7 +106,7 @@ def sanitizar(texto: str) -> str:
 
     # 5. Sobrescritos de letras isoladas
     letras = {
-        '^n': 'ⁿ', '^m': 'ᵐ', '^k': 'ᵏ', '^x': 'ˣ', '^t': 'ᵗ', '^a': 'ᵃ',
+        '^n': 'ⁿ', '^m': 'ᵐ', '^k': 'ᵏ', '^x': 'ˣ', '^t': 'ᵗ', '^a': 'ᵃ', '^p': 'ᵖ', '^i': 'ⁱ',
     }
     for orig, sub in letras.items():
         # lookahead: só substitui se NÃO for seguido de letra ou dígito
@@ -132,7 +132,25 @@ def sanitizar(texto: str) -> str:
     for k, v in mapa_simb.items():
         texto = texto.replace(k, v)
 
-    # 8. * como multiplicação → · (ponto médio Unicode)
+    # 8. Operadores relacionais ASCII → Unicode
+    # Ordem importa: <=> antes de >= e <=
+    texto = texto.replace('<=>', '⟺')
+    texto = texto.replace('=>',  '⇒')
+    texto = texto.replace('>=',  '≥')
+    texto = texto.replace('<=',  '≤')
+    texto = texto.replace('!=',  '≠')
+
+    # 9. Expoentes compostos com ponto médio que o Gemini gera
+    texto = texto.replace('^(m · n)', 'ᵐ·ⁿ')
+    texto = texto.replace('^(m · p)', 'ᵐ·ᵖ')
+    texto = texto.replace('^(n · p)', 'ⁿ·ᵖ')
+
+    # 10. raiz_N(...) → ᴺ√(...)  notação mais clara
+    texto = re.sub(r'raiz_([0-9]+)\(([^)]+)\)', r'\1√(\2)', texto)
+    texto = re.sub(r'raiz_([a-z])\(([^)]+)\)',  r'\1√(\2)', texto)
+    texto = re.sub(r'raiz\(([^)]+)\)',           r'√(\1)',    texto)
+
+    # 11. * como multiplicação → · (ponto médio Unicode)
     # Substitui apenas quando o * está entre operandos (número, letra, parêntese)
     # Não toca em ** (negrito Markdown) nem em * isolado de início de linha (bullet)
     texto = re.sub(r'(?<=[0-9a-zA-Z²³⁰¹⁴⁵⁶⁷⁸⁹ⁿᵐᵏˣᵗ\)])\s*\*\s*(?=[0-9a-zA-Z\(])', ' · ', texto)
