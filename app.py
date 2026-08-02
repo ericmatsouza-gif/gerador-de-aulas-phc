@@ -1,10 +1,13 @@
 import os
 import re
+import io
 import streamlit as st
 from google import genai
 from google.genai.errors import APIError
 from fpdf import FPDF
 import matplotlib
+import matplotlib.pyplot as plt
+from PIL import Image
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerador de Aulas", page_icon="📚", layout="centered")
@@ -53,32 +56,48 @@ def _localizar_fontes_dejavu() -> str:
 FONT_DIR = _localizar_fontes_dejavu()
 
 
+# ── GERADOR DE FRAÇÕES VERTICAIS VIA MATPLOTLIB & PILLOW ──────────────────────
+def gerar_imagem_fracao(numerador: str, denominador: str, tamanho_fonte: int = 12) -> bytes:
+    """
+    Gera uma imagem PNG transparente com a fração na vertical (numerador sobre denominador)
+    utilizando Matplotlib e Pillow.
+    """
+    fig, ax = plt.subplots(figsize=(0.8, 0.5), dpi=300)
+    fig.patch.set_alpha(0.0)
+    ax.patch.set_alpha(0.0)
+    ax.axis('off')
+
+    expressao = f"$\\frac{{{numerador}}}{{{denominador}}}$"
+    ax.text(0.5, 0.5, expressao, fontsize=tamanho_fonte, ha='center', va='center')
+
+    buffer = io.BytesIO()
+    plt.savefig(buffer, format='png', bbox_inches='tight', pad_inches=0.02, transparent=True)
+    plt.close(fig)
+    buffer.seek(0)
+    
+    # Processamento adicional de imagem via Pillow se necessário
+    img = Image.open(buffer)
+    out_buffer = io.BytesIO()
+    img.save(out_buffer, format='PNG')
+    out_buffer.seek(0)
+    return out_buffer.getvalue()
+
+
 # ── CACHE DO CLIENTE GEMINI ────────────────────────────────────────────────────
 @st.cache_resource
 def get_gemini_client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
-# ── LIMPEZA E FORMATAÇÃO MATEMÁTICA PARA PDF ───────────────────────────────────
+# ── LIMPEZA E FORMATAÇÃO MATEMÁTICA ────────────────────────────────────────────
 def sanitizar(texto: str) -> str:
-     """
-    Remove resíduos de LaTeX, cifrões e formata a matemática de forma 
-    100% limpa e compatível com as fontes DejaVu do FPDF.
-    """
     if not texto:
         return ""
 
-    # 1. Remove qualquer cifrão de LaTeX
+    # Preserva \frac{a}{b} e remove apenas cifrões isolados
     texto = texto.replace('$', '')
 
-    # 2. Limpa comandos e tags LaTeX comuns que causam ruído
-    texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'(\1-ésima raiz de \2)', texto)
-    texto = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', texto)
-    texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
-    texto = re.sub(r'\\text\{([^}]+)\}', r'\1', texto)
-    texto = re.sub(r'\\[a-zA-Z]+', '', texto)
-
-    # 3. Mapeamento de sobrescritos comuns
+    # Substituições para potências limpas em Unicode
     sobrescritos = {
         '^0': '⁰', '^1': '¹', '^2': '²', '^3': '³', '^4': '⁴',
         '^5': '⁵', '^6': '⁶', '^7': '⁷', '^8': '⁸', '^9': '⁹',
@@ -88,41 +107,12 @@ def sanitizar(texto: str) -> str:
     for orig, sub in sobrescritos.items():
         texto = texto.replace(orig, sub)
 
-    # 4. Troca \cdot por ponto mediano '·', MAS NÃO mexe nos asteriscos (*) do Markdown!
+    # Troca operador \cdot mantendo integridade do Markdown (sem alterar os **)
     texto = texto.replace('\\cdot', ' · ')
     texto = texto.replace('`', '')
     
-    # 5. Limpa múltiplos pontos seguidos acidentais que não sejam reticências (...)
+    # Remove duplicações acidentais de pontos
     texto = re.sub(r'(?<!\.)\.\.(?!\.)', '', texto)
-
-    return texto
-
-    # 1. Remove qualquer cifrão de LaTeX
-    texto = texto.replace('$', '')
-
-    # 2. Limpa comandos e tags LaTeX comuns que causam ruído
-    texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'(\1-ésima raiz de \2)', texto)
-    texto = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', texto)
-    texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
-    texto = re.sub(r'\\text\{([^}]+)\}', r'\1', texto)
-    texto = re.sub(r'\\[a-zA-Z]+', '', texto)
-
-    # 3. Mapeamento de sobrescritos comuns para potências elegantes
-    sobrescritos = {
-        '^0': '⁰', '^1': '¹', '^2': '²', '^3': '³', '^4': '⁴',
-        '^5': '⁵', '^6': '⁶', '^7': '⁷', '^8': '⁸', '^9': '⁹',
-        '^n': 'ⁿ', '^m': 'ᵐ', '^k': 'ᵏ', '^x': 'ˣ', '^t': 'ᵗ',
-        '^(m+n)': 'ᵐ⁺ⁿ', '^(m-n)': 'ᵐ⁻ⁿ', '^(m.n)': 'ᵐ·ⁿ', '^(m·n)': 'ᵐ·ⁿ'
-    }
-    for orig, sub in sobrescritos.items():
-        texto = texto.replace(orig, sub)
-
-    # 4. Ajustes finos em símbolos
-    texto = texto.replace('\\cdot', '.').replace('*', '.')
-    texto = texto.replace('`', '')
-    
-    # 5. Remove espaços múltiplos e parênteses desnecessários resultantes
-    texto = re.sub(r'\s+', ' ', texto)
 
     return texto
 
@@ -162,22 +152,37 @@ class PDFMaterial(FPDF):
         self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", align="R")
 
 
-# ── ESCREVER PARÁGRAFO COM NEGRITO INLINE ──────────────────────────────────────
+# ── ESCREVER PARÁGRAFO COM NEGRITO E FRAÇÕES VERTICAIS INLINE ──────────────────
 def escrever_texto_formatado(pdf: FPDF, texto: str, recuo_x: float = 0):
     pdf.set_x(pdf.l_margin + recuo_x)
-    partes = re.split(r'(\*\*.*?\*\*)', texto)
     
-    for parte in partes:
-        if not parte:
-            continue
-        if parte.startswith('**') and parte.endswith('**'):
-            conteudo = parte[2:-2]
-            pdf.set_font("DejaVu", "B", 10)
+    # Processa blocos de texto e tags \frac{num}{den}
+    partes_fracao = re.split(r'(\\frac\{[^}]+\}\{[^}]+\})', texto)
+
+    for subtexto in partes_fracao:
+        match_frac = re.match(r'\\frac\{([^}]+)\}\{([^}]+)\}', subtexto)
+        if match_frac:
+            num, den = match_frac.group(1), match_frac.group(2)
+            img_bytes = gerar_imagem_fracao(num, den)
+            img_stream = io.BytesIO(img_bytes)
+            
+            x_atual = pdf.get_x()
+            y_atual = pdf.get_y()
+            pdf.image(img_stream, x=x_atual, y=y_atual - 2.5, h=7.5)
+            pdf.set_x(x_atual + 9)
         else:
-            conteudo = parte
-            pdf.set_font("DejaVu", "", 10)
-        
-        pdf.write(5.5, conteudo)
+            partes_bold = re.split(r'(\*\*.*?\*\*)', subtexto)
+            for parte in partes_bold:
+                if not parte:
+                    continue
+                if parte.startswith('**') and parte.endswith('**'):
+                    conteudo = parte[2:-2]
+                    pdf.set_font("DejaVu", "B", 10)
+                else:
+                    conteudo = parte
+                    pdf.set_font("DejaVu", "", 10)
+                pdf.write(5.5, conteudo)
+
     pdf.ln(6)
 
 
@@ -198,7 +203,6 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
             pdf.ln(2)
             continue
 
-        # H1 ─ Seção Principal
         if re.match(r'^# ', s):
             texto_h = re.sub(r'^# ', '', s)
             pdf.ln(3)
@@ -209,7 +213,6 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
             pdf.set_text_color(44, 62, 80)
             pdf.ln(2.5)
 
-        # H2 ─ Subseção
         elif re.match(r'^## ', s):
             texto_h = re.sub(r'^## ', '', s)
             pdf.ln(2.5)
@@ -222,7 +225,6 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
             pdf.set_text_color(44, 62, 80)
             pdf.ln(2)
 
-        # H3 / H4 ─ Sub-subseção
         elif re.match(r'^#{3,4}\s+', s):
             texto_h = re.sub(r'^#{3,4}\s+', '', s)
             pdf.ln(1.5)
@@ -232,7 +234,6 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
             pdf.set_text_color(44, 62, 80)
             pdf.ln(1)
 
-        # Items de Lista (- ou * ou números)
         elif re.match(r'^[-*]\s+', s):
             texto_item = re.sub(r'^[-*]\s+', '', s)
             pdf.set_x(pdf.l_margin + 3)
@@ -240,7 +241,6 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
             pdf.write(5.5, "• ")
             escrever_texto_formatado(pdf, texto_item, recuo_x=7)
 
-        # Parágrafos comuns
         else:
             escrever_texto_formatado(pdf, s, recuo_x=0)
 
@@ -271,7 +271,7 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     {bloco_bncc}
 
     ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
-    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido
+    1. O conhecimento científico/escolar deve ser tratado como um saber systematizado, produzido
        historicamente pela humanidade para responder a necessidades concretas de sobrevivência,
        trabalho e organização social.
     2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA
@@ -297,19 +297,15 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
 
     REGRAS DE FORMATAÇÃO E NOTAÇÃO MATEMÁTICA DIDÁTICA (MUITO IMPORTANTE):
-    - É STRICTLY PROIBIDO usar código LaTeX (NÃO use $, $$, \\frac, \\sqrt, \\cdot, \\ge, etc).
-    - É PROIBIDO usar notação de programação como a^n ou raiz_n(a).
-    - As equações devem ser escritas de forma textual e limpa para alunos do Ensino Fundamental:
-      * Potências: use a², a³, aⁿ, aᵐ⁺ⁿ, aᵐ⁻ⁿ, 2⁶.
-      * Radicais: use √144 = 12, √x, ³√27 = 3, raiz n-ésima de a, raiz cúbica de x.
-      * Multiplicação: use o ponto simples (.) ou x. Exemplo: a . b
-      * Divisão: use / ou ÷. Exemplo: a / b
+    - Para frações, use OBRIGATORIAMENTE a notação: \\frac{{numerador}}{{denominador}}.
+    - Para potências, use notação limpa Unicode (a², a³, aⁿ, aᵐ⁺ⁿ, 2⁶).
+    - Radicais: use √144 = 12, √x, ³√27 = 3.
+    - Multiplicação: use o ponto simples (.) ou x. Exemplo: a . b
     - Use ## para subseções dentro de cada seção principal.
     - Use **negrito** para termos técnicos e enunciados.
     - NÃO inclua saudações. Comece direto no título '# 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO'.
     """
 
-    # Lista de modelos ordenada por prioridade (incluindo gemini-flash-latest)
     modelos = [
         'gemini-flash-latest',
         'gemini-2.5-flash',
@@ -327,14 +323,15 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
             return response.text
         except APIError as e:
             msg_erro = str(e).upper()
-            # Captura erros de cota (429/quota), indisponibilidade (503/unavailable) e modelo inexistente (404/not_found)
             if any(codigo in msg_erro for codigo in ["503", "UNAVAILABLE", "404", "NOT_FOUND", "429", "RESOURCE_EXHAUSTED", "QUOTA"]):
                 ultimo_erro = e
-                continue  # Pula para o próximo modelo da lista
+                continue
             raise e
             
     if ultimo_erro:
         raise ultimo_erro
+
+
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/teacher.png", width=70)
@@ -372,14 +369,11 @@ if not api_key:
 
 col_disc, col_ano = st.columns(2)
 with col_disc:
-    disciplina  = st.text_input("Disciplina / Componente Curricular",
-                                placeholder="Ex: Matemática, História, Física...")
+    disciplina  = st.text_input("Disciplina / Componente Curricular", placeholder="Ex: Matemática, História, Física...")
 with col_ano:
-    ano_escolar = st.text_input("Ano / Série",
-                                placeholder="Ex: 8º ano, 1º ano do EM...")
+    ano_escolar = st.text_input("Ano / Série", placeholder="Ex: 8º ano, 1º ano do EM...")
 
-assunto = st.text_input("Assunto / Conteúdo Específico",
-                        placeholder="Ex: Potenciação e Radiciação, Revolução Industrial...")
+assunto = st.text_input("Assunto / Conteúdo Específico", placeholder="Ex: Potenciação e Radiciação, Revolução Industrial...")
 
 codigo_bncc = st.text_input(
     "🎯 Código de Habilidade BNCC (opcional)",
@@ -401,8 +395,7 @@ if st.button("✨ Gerar Material Didático"):
         try:
             with st.spinner("🧠 Elaborando o plano de aula crítico via Gemini..."):
                 client      = get_gemini_client(api_key)
-                conteudo_md = gerar_conteudo_phc(client, disciplina, ano_escolar,
-                                                 assunto, codigo_bncc)
+                conteudo_md = gerar_conteudo_phc(client, disciplina, ano_escolar, assunto, codigo_bncc)
 
             st.session_state.conteudo_md       = conteudo_md
             st.session_state.ultima_disciplina = disciplina
