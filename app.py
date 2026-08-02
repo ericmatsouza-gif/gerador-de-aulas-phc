@@ -6,6 +6,7 @@ import streamlit as st
 from google import genai
 from google.genai.errors import APIError
 from fpdf import FPDF
+from google.genai import types
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerador de Aulas", page_icon="📚", layout="centered")
@@ -218,8 +219,7 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
     return bytes(pdf.output())
 
 
-# ── GERAÇÃO DE CONTEÚDO VIA GEMINI COM FALLBACK AUTOMÁTICO ────────────────────
-# ── GERAÇÃO DE CONTEÚDO VIA GEMINI COM FALLBACK SEGURO ─────────────────────────
+# ── GERAÇÃO DE CONTEÚDO VIA GEMINI OTIMIZADA PARA COTA GRATUITA ───────────────
 def gerar_conteudo_phc(client: genai.Client, disciplina: str,
                        ano_escolar: str, assunto: str,
                        codigo_bncc: str = "") -> str:
@@ -279,13 +279,19 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     - NÃO inclua saudações. Comece direto no título '# 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO'.
     """
 
-    # Nomes OFICIAIS aceitos pela API do Google AI Studio
+    # Modelos organizados com separação real de cotas
     modelos = [
         'gemini-flash-latest',
         'gemini-2.0-flash',
         'gemini-1.5-flash',
         'gemini-1.5-pro'
     ]
+
+    # Configuração com limite de tokens para não estourar TPM (Tokens Por Minuto)
+    config = types.GenerateContentConfig(
+        max_output_tokens=2500,
+        temperature=0.7
+    )
     
     ultimo_erro = None
     for modelo in modelos:
@@ -293,13 +299,14 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
             response = client.models.generate_content(
                 model=modelo,
                 contents=prompt,
+                config=config
             )
             return response.text
         except APIError as e:
             msg_erro = str(e).upper()
             if any(codigo in msg_erro for codigo in ["503", "UNAVAILABLE", "404", "NOT_FOUND", "429", "RESOURCE_EXHAUSTED", "QUOTA"]):
                 ultimo_erro = e
-                time.sleep(3)  # Pausa de 3 segundos para recompor a cota por segundo/minuto
+                time.sleep(7)  # Aguarda 7 segundos para descarregar a janela de cota por minuto
                 continue
             raise e
             
