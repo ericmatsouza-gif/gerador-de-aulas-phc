@@ -5,9 +5,6 @@ import streamlit as st
 from google import genai
 from google.genai.errors import APIError
 from fpdf import FPDF
-import matplotlib
-import matplotlib.pyplot as plt
-from PIL import Image
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerador de Aulas", page_icon="📚", layout="centered")
@@ -39,68 +36,26 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
 # ── FONTES DejaVu (TTF Unicode) ───────────────────────────────────────────────
 def _localizar_fontes_dejavu() -> str:
     sistema = "/usr/share/fonts/truetype/dejavu"
     if os.path.isfile(os.path.join(sistema, "DejaVuSans.ttf")):
         return sistema + "/"
-    mpl_dir = os.path.join(
-        os.path.dirname(matplotlib.__file__), "mpl-data", "fonts", "ttf"
-    )
-    if os.path.isfile(os.path.join(mpl_dir, "DejaVuSans.ttf")):
-        return mpl_dir + "/"
-    raise FileNotFoundError(
-        "Fontes DejaVu não encontradas. Instale fonts-dejavu-core ou matplotlib."
-    )
+    
+    # Fallback genérico para ambientes Linux / Streamlit Cloud
+    if os.path.isdir("/usr/share/fonts"):
+        for root, dirs, files in os.walk("/usr/share/fonts"):
+            if "DejaVuSans.ttf" in files:
+                return root + "/"
+                
+    raise FileNotFoundError("Fontes DejaVu não encontradas no sistema.")
 
-FONT_DIR = _localizar_fontes_dejavu()
+try:
+    FONT_DIR = _localizar_fontes_dejavu()
+except Exception:
+    FONT_DIR = ""  # Caso esteja rodando localmente sem a pasta específica
 
-
-# ── GERADOR DE FRAÇÕES VERTICAIS VIA MATPLOTLIB & PILLOW ──────────────────────
-# ── GERADOR DE FRAÇÕES VERTICAIS VIA MATPLOTLIB & PILLOW (BLINDADO) ────────────
-def gerar_imagem_fracao(numerador: str, denominador: str, tamanho_fonte: int = 12) -> bytes:
-    """
-    Gera uma imagem PNG transparente com a fração na vertical.
-    Conta com fallback para evitar exceções de sintaxe LaTeX (ParseSyntaxException).
-    """
-    # 1. Limpeza de caracteres que costumam quebrar a sintaxe do Matplotlib
-    num_clean = re.sub(r'[\{\}]', '', numerador).strip()
-    den_clean = re.sub(r'[\{\}]', '', denominador).strip()
-
-    fig, ax = plt.subplots(figsize=(0.8, 0.5), dpi=300)
-    fig.patch.set_alpha(0.0)
-    ax.patch.set_alpha(0.0)
-    ax.axis('off')
-
-    try:
-        # Tenta renderizar em notação LaTeX elegante
-        expressao = f"$\\frac{{{num_clean}}}{{{den_clean}}}$"
-        ax.text(0.5, 0.5, expressao, fontsize=tamanho_fonte, ha='center', va='center')
-        
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png', bbox_inches='tight', pad_inches=0.02, transparent=True)
-        plt.close(fig)
-    except Exception:
-        # FALLBACK DE SEGURANÇA: Se o LaTeX falhar, desenha como texto simples sem quebrar o app
-        plt.close(fig)
-        fig, ax = plt.subplots(figsize=(0.8, 0.5), dpi=300)
-        fig.patch.set_alpha(0.0)
-        ax.patch.set_alpha(0.0)
-        ax.axis('off')
-        
-        expressao_texto = f"{num_clean} / {den_clean}"
-        ax.text(0.5, 0.5, expressao_texto, fontsize=tamanho_fonte, ha='center', va='center')
-        
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png', bbox_inches='tight', pad_inches=0.02, transparent=True)
-        plt.close(fig)
-
-    buffer.seek(0)
-    img = Image.open(buffer)
-    out_buffer = io.BytesIO()
-    img.save(out_buffer, format='PNG')
-    out_buffer.seek(0)
-    return out_buffer.getvalue()
 
 # ── CACHE DO CLIENTE GEMINI ────────────────────────────────────────────────────
 @st.cache_resource
@@ -113,8 +68,11 @@ def sanitizar(texto: str) -> str:
     if not texto:
         return ""
 
-    # Preserva \frac{a}{b} e remove apenas cifrões isolados
+    # Remove cifrões de LaTeX
     texto = texto.replace('$', '')
+
+    # Converte notação \frac{a}{b} em notação linear limpa (a / b)
+    texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
 
     # Substituições para potências limpas em Unicode
     sobrescritos = {
@@ -126,7 +84,7 @@ def sanitizar(texto: str) -> str:
     for orig, sub in sobrescritos.items():
         texto = texto.replace(orig, sub)
 
-    # Troca operador \cdot mantendo integridade do Markdown (sem alterar os **)
+    # Ajusta operadores para notação limpa
     texto = texto.replace('\\cdot', ' · ')
     texto = texto.replace('`', '')
     
@@ -143,15 +101,19 @@ class PDFMaterial(FPDF):
         self.disciplina  = disciplina
         self.ano_escolar = ano_escolar
         self.assunto     = assunto
-        self.add_font("DejaVu",  style="",  fname=FONT_DIR + "DejaVuSans.ttf")
-        self.add_font("DejaVu",  style="B", fname=FONT_DIR + "DejaVuSans-Bold.ttf")
-        self.add_font("DejaVuI", style="",  fname=FONT_DIR + "DejaVuSerif-Italic.ttf")
+        if FONT_DIR:
+            self.add_font("DejaVu",  style="",  fname=FONT_DIR + "DejaVuSans.ttf")
+            self.add_font("DejaVu",  style="B", fname=FONT_DIR + "DejaVuSans-Bold.ttf")
+            self.add_font("DejaVuI", style="",  fname=FONT_DIR + "DejaVuSerif-Italic.ttf")
+        else:
+            self.set_font("helvetica", "", 10)
 
     def header(self):
-        self.set_font("DejaVu", "B", 12)
+        fonte = "DejaVu" if FONT_DIR else "helvetica"
+        self.set_font(fonte, "B", 12)
         self.set_text_color(26, 42, 58)
         self.cell(0, 6, "PLANO DE AULA E MATERIAL DIDÁTICO", align="C", new_x="LMARGIN", new_y="NEXT")
-        self.set_font("DejaVu", "B", 8.5)
+        self.set_font(fonte, "B", 8.5)
         self.set_text_color(41, 128, 185)
         subtitulo = f"{self.disciplina.upper()} | {self.ano_escolar} | Assunto: {self.assunto}"
         self.cell(0, 5, subtitulo, align="C", new_x="LMARGIN", new_y="NEXT")
@@ -163,30 +125,31 @@ class PDFMaterial(FPDF):
         self.set_text_color(44, 62, 80)
 
     def footer(self):
+        fonte_i = "DejaVuI" if FONT_DIR else "helvetica"
+        fonte = "DejaVu" if FONT_DIR else "helvetica"
         self.set_y(-14)
-        self.set_font("DejaVuI", "", 8)
+        self.set_font(fonte_i, "", 8)
         self.set_text_color(130, 130, 130)
         self.cell(0, 10, "Elaborado por Prof. Me. Eric Souza | PHC", align="L")
-        self.set_font("DejaVu", "", 8)
+        self.set_font(fonte, "", 8)
         self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", align="R")
 
 
-
-# ── ESCREVER PARÁGRAFO COM NEGRITO (SEM GERAR IMAGENS - LEVE E RÁPIDO) ─────────
+# ── ESCREVER PARÁGRAFO COM NEGRITO (RÁPIDO E LEVE) ─────────────────────────────
 def escrever_texto_formatado(pdf: FPDF, texto: str, recuo_x: float = 0):
     pdf.set_x(pdf.l_margin + recuo_x)
+    fonte = "DejaVu" if FONT_DIR else "helvetica"
     
-    # Divide o texto pelas marcas de negrito (**texto**)
     partes_bold = re.split(r'(\*\*.*?\*\*)', texto)
     for parte in partes_bold:
         if not parte:
             continue
         if parte.startswith('**') and parte.endswith('**'):
             conteudo = parte[2:-2]
-            pdf.set_font("DejaVu", "B", 10)
+            pdf.set_font(fonte, "B", 10)
         else:
             conteudo = parte
-            pdf.set_font("DejaVu", "", 10)
+            pdf.set_font(fonte, "", 10)
         pdf.write(5.5, conteudo)
 
     pdf.ln(6)
@@ -200,6 +163,7 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
     W = pdf.epw
+    fonte = "DejaVu" if FONT_DIR else "helvetica"
 
     for linha_raw in texto_md.split('\n'):
         linha = sanitizar(linha_raw.rstrip())
@@ -213,7 +177,7 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
             texto_h = re.sub(r'^# ', '', s)
             pdf.ln(3)
             pdf.set_fill_color(41, 128, 185)
-            pdf.set_font("DejaVu", "B", 11)
+            pdf.set_font(fonte, "B", 11)
             pdf.set_text_color(255, 255, 255)
             pdf.cell(W, 7.5, f"  {texto_h}", fill=True, new_x="LMARGIN", new_y="NEXT")
             pdf.set_text_color(44, 62, 80)
@@ -222,7 +186,7 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
         elif re.match(r'^## ', s):
             texto_h = re.sub(r'^## ', '', s)
             pdf.ln(2.5)
-            pdf.set_font("DejaVu", "B", 10.5)
+            pdf.set_font(fonte, "B", 10.5)
             pdf.set_text_color(26, 42, 58)
             pdf.cell(W, 6, texto_h, new_x="LMARGIN", new_y="NEXT")
             pdf.set_draw_color(41, 128, 185)
@@ -234,7 +198,7 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
         elif re.match(r'^#{3,4}\s+', s):
             texto_h = re.sub(r'^#{3,4}\s+', '', s)
             pdf.ln(1.5)
-            pdf.set_font("DejaVu", "B", 10)
+            pdf.set_font(fonte, "B", 10)
             pdf.set_text_color(41, 128, 185)
             pdf.multi_cell(W, 5.5, texto_h)
             pdf.set_text_color(44, 62, 80)
@@ -243,7 +207,7 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
         elif re.match(r'^[-*]\s+', s):
             texto_item = re.sub(r'^[-*]\s+', '', s)
             pdf.set_x(pdf.l_margin + 3)
-            pdf.set_font("DejaVu", "", 10)
+            pdf.set_font(fonte, "", 10)
             pdf.write(5.5, "• ")
             escrever_texto_formatado(pdf, texto_item, recuo_x=7)
 
@@ -277,7 +241,7 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     {bloco_bncc}
 
     ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
-    1. O conhecimento científico/escolar deve ser tratado como um saber systematizado, produzido
+    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido
        historicamente pela humanidade para responder a necessidades concretas de sobrevivência,
        trabalho e organização social.
     2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA
@@ -303,14 +267,15 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
 
     REGRAS DE FORMATAÇÃO E NOTAÇÃO MATEMÁTICA DIDÁTICA (MUITO IMPORTANTE):
-    - É PROIBIDO usar a sintaxe \frac{a}{b} do LaTeX.
-    - Para frações, use a notação em linha limpa: (a / b) ou a / b. Exemplo: (a + b) / 2, 3 / 4.
+    - É STRICTLY PROIBIDO usar a sintaxe \\frac{{a}}{{b}} do LaTeX.
+    - Para frações, use notação em linha limpa: (a / b) ou a / b. Exemplo: (a + b) / 2.
     - Para potências, use notação limpa Unicode (a², a³, aⁿ, aᵐ⁺ⁿ, 2⁶).
     - Radicais: use √144 = 12, √x, ³√27 = 3.
     - Multiplicação: use o ponto simples (.) ou x. Exemplo: a . b
     - Use ## para subseções dentro de cada seção principal.
     - Use **negrito** para termos técnicos e enunciados.
     - NÃO inclua saudações. Comece direto no título '# 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO'.
+    """
 
     modelos = [
         'gemini-flash-latest',
@@ -357,9 +322,10 @@ with st.sidebar:
 # ── INTERFACE PRINCIPAL ────────────────────────────────────────────────────────
 st.title("📚 Gerador de Aulas")
 
+# Bloco HTML envelopado corretamente
 st.markdown("""
 <div class="author-card">
-  <div class="author-name">👨‍🏫 Desenvolvido por Prof. Me. Eric Souza da Silva</div>
+  <div class="author-name">Desenvolvido por Prof. Me. Eric Souza da Silva</div>
   <div class="author-desc">Plataforma pedagógica para elaboração de materiais didáticos multidisciplinares sob
   a perspectiva da <b>Pedagogia Histórico-Crítica</b> e <b>Hegemonia Gramsciana</b>.</div>
   <div>
