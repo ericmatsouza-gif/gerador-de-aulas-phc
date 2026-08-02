@@ -334,7 +334,7 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     """
 
     config = types.GenerateContentConfig(
-        max_output_tokens=2500,
+        max_output_tokens=8192,
         temperature=0.7
     )
 
