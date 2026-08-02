@@ -269,7 +269,8 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
             renderer.render_line(re.sub(r'^#{3,4}\s+', '**', s) + '**')
         else:
             renderer.render_line(linha)
-    return pdf.output(dest='S')
+    # CORREÇÃO CRÍTICA: Converter bytearray para bytes
+    return bytes(pdf.output())
 
 # ── LOGICA DE GERAÇÃO E UI ────────────────────────────────────────────────────
 @st.cache_resource
@@ -279,7 +280,6 @@ def get_gemini_client(api_key: str) -> genai.Client:
 def gerar_conteudo_phc(client, disciplina, ano_escolar, assunto, codigo_bncc=""):
     prompt = f"Professor PHC. Matéria: {disciplina}, {ano_escolar}. Assunto: {assunto}. BNCC: {codigo_bncc}. Estrutura: # 1. Prática Social, # 2. Fixação, # 3. Leitura Crítica, # 4. Gabarito. Use (a/b) para frações e ^(exp) para potências."
     config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
-    # USO OBRIGATÓRIO DO MODELO FLASH LATEST
     response = client.models.generate_content(model='gemini-flash-latest', contents=prompt, config=config)
     return response.text
 
@@ -294,7 +294,8 @@ st.title("📚 Gerador de Aulas")
 st.markdown('<div class="author-card"><div class="author-name">Prof. Me. Eric Souza da Silva</div><div class="author-desc">Perspectiva PHC e Hegemonia Gramsciana.</div></div>', unsafe_allow_html=True)
 
 api_key = os.getenv("GEMINI_API_KEY", "")
-if not api_key: api_key = st.text_input("🔑 Chave API Gemini:", type="password")
+if not api_key:
+    api_key = st.text_input("🔑 Chave API Gemini:", type="password")
 
 col_disc, col_ano = st.columns(2)
 with col_disc: disciplina = st.text_input("Disciplina", placeholder="Ex: Matemática")
@@ -316,7 +317,7 @@ if st.button("✨ Gerar Material Didático"):
             st.success("✅ Gerado!")
         except APIError as e:
             if "503" in str(e) or "unavailable" in str(e).lower():
-                st.error("⚠️ O servidor do Google está com alta demanda no momento (Erro 503). Por favor, aguarde alguns segundos e tente clicar no botão novamente.")
+                st.error("⚠️ Servidor ocupado. Tente novamente em alguns segundos.")
             else:
                 st.error(f"❌ Erro na API Gemini: {e}")
         except Exception as e: st.error(f"❌ Erro inesperado: {e}")
