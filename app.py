@@ -3,6 +3,7 @@ import re
 import streamlit as st
 from google import genai
 from fpdf import FPDF
+from google.genai.errors import APIError
 
 # --- CONFIGURAÇÃO DA PÁGINA WEB ---
 st.set_page_config(
@@ -227,7 +228,7 @@ Atua em Educação Matemática, Tecnologias Digitais no Ensino, História da Edu
 
     st.divider()
 
-    st.info("💡 Aplicação para geração de materiais didáticos multidisciplinares ob a perspectiva da <b>Pedagogia Histórico-Crítica</b> e <b>Hegemonia Gramsciana</b>.")
+    st.info("💡 Aplicação para geração de materiais didáticos multidisciplinares ob a perspectiva da Pedagogia Histórico-Crítica e Hegemonia Gramsciana.")
 
 # --- INTERFACE PRINCIPAL ---
 st.title("📚 Gerador de Aulas")
@@ -280,9 +281,14 @@ if st.button("✨ Gerar Material Didático (PDF)"):
 
             with st.expander("👀 Visualizar texto gerado"):
                 st.markdown(conteudo_md)
-
+                
+        except APIError as e:
+            if "503" in str(e) or "UNAVAILABLE" in str(e):
+                 st.warning("⚠️ Os servidores da Inteligência Artificial estão muito ocupados no momento. Por favor, aguarde alguns segundos e clique no botão novamente.")
+            else:
+                 st.error(f"Erro de comunicação com a Inteligência Artificial: {e}")
         except Exception as e:
-            st.error(f"Ocorreu um erro ao processar a solicitação: {e}")
+            st.error(f"Ocorreu um erro interno ao processar o PDF: {e}")
 
 st.markdown("""
     <div class="footer">
