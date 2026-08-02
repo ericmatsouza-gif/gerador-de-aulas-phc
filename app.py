@@ -106,6 +106,40 @@ class PDFMaterial(FPDF):
         self.cell(0, 10, f'Página {self.page_no()}/{{nb}}', align='R')
 
 
+def limpar_texto_para_fpdf(texto: str) -> str:
+    """Limpa formatações Markdown, expressões LaTeX e caracteres incompatíveis para FPDF."""
+    if not texto:
+        return ""
+    
+    # 1. Remove marcadores e delimitações de LaTeX ($...$, \$...\$)
+    texto = re.sub(r'\\?\$', '', texto)  # Remove $ e \$
+    
+    # 2. Converte comandos simples de LaTeX para texto plano
+    texto = texto.replace('^{\\wedge}', '^')
+    texto = texto.replace('^{\\circ}', '°')
+    texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1/\2)', texto)  # \frac{a}{b} -> (a/b)
+    texto = re.sub(r'\\sqrt\[([^}]+)\]\{([^}]+)\}', r'root(\1, \2)', texto)  # \sqrt[n]{a}
+    texto = re.sub(r'\\sqrt\{([^}]+)\}', r'sqrt(\1)', texto)  # \sqrt{a} -> sqrt(a)
+    texto = re.sub(r'\\cdot', '·', texto)
+    texto = re.sub(r'\\text\{([^}]+)\}', r'\1', texto)
+    texto = re.sub(r'\\[a-zA-Z]+', '', texto)  # Remove outros comandos \comando
+    
+    # 3. Limpa formatações em negrito/itálico do Markdown
+    texto = texto.replace('**', '').replace('*', '').replace('`', '')
+    
+    # 4. Substituição de caracteres especiais incompatíveis com Helvetica (Latin-1)
+    substituicoes = {
+        '•': '-', '—': '-', '–': '-',
+        '“': '"', '”': '"', '‘': "'", '’': "'",
+        '≤': '<=', '≥': '>=', '≠': '!=', '≈': '~'
+    }
+    for orig, dest in substituicoes.items():
+        texto = texto.replace(orig, dest)
+        
+    # Garante codificação Latin-1 sem estourar exceção
+    return texto.encode('latin-1', 'replace').decode('latin-1')
+
+
 def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str) -> bytes:
     pdf = PDFMaterial(disciplina, ano_escolar, assunto)
     pdf.alias_nb_pages()
@@ -113,9 +147,7 @@ def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: st
     pdf.set_margins(15, 15, 15)
     pdf.set_auto_page_break(auto=True, margin=15)
     
-    # Define a largura útil exata da página
     largura_util = pdf.epw 
-    
     linhas = texto_md.split('\n')
     
     for linha in linhas:
@@ -124,9 +156,8 @@ def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: st
             pdf.ln(3)
             continue
             
-        # Tratamento de símbolos incompatíveis com a fonte Helvetica (Latin-1)
-        linha_str = linha_str.replace('•', '-').replace('—', '-').replace('–', '-')
-        texto_limpo = linha_str.encode('latin-1', 'replace').decode('latin-1')
+        # Aplica a limpeza de texto e LaTeX
+        texto_limpo = limpar_texto_para_fpdf(linha_str)
             
         # Títulos (#, ##, ###)
         if linha_str.startswith('#'):
@@ -134,22 +165,21 @@ def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: st
             pdf.set_font('Helvetica', 'B', 12)
             pdf.set_text_color(26, 42, 58)
             pdf.ln(3)
-            pdf.multi_cell(largura_util, 6, texto_titulo)  # <--- Removido wrap_graphemes=True
+            pdf.multi_cell(largura_util, 6, texto_titulo)
             pdf.ln(2)
             
         # Tópicos (- ou *)
         elif linha_str.startswith('- ') or linha_str.startswith('* '):
-            texto_item = texto_limpo[2:].replace('**', '').replace('*', '')
+            texto_item = re.sub(r'^[-*]\s*', '', texto_limpo)
             pdf.set_font('Helvetica', '', 10)
             pdf.set_text_color(44, 62, 80)
-            pdf.multi_cell(largura_util, 5, f"- {texto_item}")  # <--- Removido wrap_graphemes=True
+            pdf.multi_cell(largura_util, 5, f"- {texto_item}")
             
         # Parágrafos comuns
         else:
-            texto_paragrafo = texto_limpo.replace('**', '').replace('*', '')
             pdf.set_font('Helvetica', '', 10)
             pdf.set_text_color(44, 62, 80)
-            pdf.multi_cell(largura_util, 5, texto_paragrafo)  # <--- Removido wrap_graphemes=True
+            pdf.multi_cell(largura_util, 5, texto_limpo)
             pdf.ln(1)
             
     return bytes(pdf.output())
@@ -168,7 +198,7 @@ def gerar_conteudo_phc(api_key: str, disciplina: str, ano_escolar: str, assunto:
     - Conteúdo/Assunto: {assunto}
 
     ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
-    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido historicamente 
+    1. O conhecimento científico/escolar deve ser tratado como um saber systematizado, produzido historicamente 
        pela humanidade para responder a necessidades concretas de sobrevivência, trabalho e organização social.
     2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA REALIDADE, 
        capacitando os sujeitos (especialmente das classes populares) para o AUTOGOVERNO, a interpretação da sociedade, 
@@ -193,9 +223,14 @@ def gerar_conteudo_phc(api_key: str, disciplina: str, ano_escolar: str, assunto:
     4. GABARITO COMENTADO E PEDAGÓGICO
     - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
 
-    REGRAS CRÍTICAS DE FORMATO DE TEXTO:
-    - NUNCA use o asterisco (*) no meio de uma linha para separar itens. Use SEMPRE quebras de linha com "- " ou "* ".
-    - Para expressões matemáticas/fórmulas, use a sintaxe limpa sem comandos LaTeX complexos.
+    REGRAS CRÍTICAS DE FORMATO DE TEXTO (OBRIGATÓRIO PARA GERAÇÃO DE PDF):
+    - NUNCA USE SINTAXE LATEX (PROIBIDO usar cifrões como $, $$, comandos como \\frac, \\sqrt, \\cdot, etc).
+    - Escreva expressões matemáticas de forma simples em TEXTO PLANO legível. Exemplos: 
+      * Use a^b para potências (exemplo: 2^10, a^n).
+      * Use sqrt(x) ou raiz(x) para raízes.
+      * Use a / b para frações simples (exemplo: 5/2).
+      * Use * ou · para multiplicação.
+    - NUNCA use o asterisco (*) isolado no meio de uma linha.
     - NÃO inclua saudações nem introdução. Comece direto na Seção 1.
     """
 
@@ -204,7 +239,6 @@ def gerar_conteudo_phc(api_key: str, disciplina: str, ano_escolar: str, assunto:
         contents=prompt,
     )
     return response.text
-
 
 # --- BARRA LATERAL (SIDEBAR) ---
 with st.sidebar:
