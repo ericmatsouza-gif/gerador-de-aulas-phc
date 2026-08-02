@@ -88,11 +88,21 @@ def sanitizar(texto: str) -> str:
     texto = re.sub(r'\\(left|right|displaystyle|limits|nolimits)', '', texto)
     texto = re.sub(r'\\[a-zA-Z]+', '', texto)   # demais comandos \xyz
 
-    # Potências com chaves → parênteses; ^2 ^3 → sobrescritos Unicode
+    # Potências com chaves → parênteses  ex: ^{mn} → ^(mn)
     texto = re.sub(r'\^\{([^}]+)\}', r'^(\1)', texto)
-    texto = (texto
-             .replace('^0', '⁰').replace('^1', '¹')
-             .replace('^2', '²').replace('^3', '³'))
+
+    # Sobrescritos Unicode APENAS para expoentes de 1 dígito isolado.
+    # Lookahead negativo (?!\d) impede ^1 de cortar ^10, ^12, ^15 etc.
+    texto = re.sub(r'\^0(?!\d)', '\u2070', texto)
+    texto = re.sub(r'\^1(?!\d)', '\u00b9', texto)
+    texto = re.sub(r'\^2(?!\d)', '\u00b2', texto)
+    texto = re.sub(r'\^3(?!\d)', '\u00b3', texto)
+    texto = re.sub(r'\^4(?!\d)', '\u2074', texto)
+    texto = re.sub(r'\^5(?!\d)', '\u2075', texto)
+    texto = re.sub(r'\^6(?!\d)', '\u2076', texto)
+    texto = re.sub(r'\^7(?!\d)', '\u2077', texto)
+    texto = re.sub(r'\^8(?!\d)', '\u2078', texto)
+    texto = re.sub(r'\^9(?!\d)', '\u2079', texto)
 
     # Símbolos matemáticos Unicode
     mapa = {
