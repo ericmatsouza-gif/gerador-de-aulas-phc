@@ -106,10 +106,11 @@ class PDFMaterial(FPDF):
         self.cell(0, 10, f'Página {self.page_no()}/{{nb}}', align='R')
 
 
-def formatar_matematica_unicode(texto: str) -> str:
+def sanitizar_texto_latin1(texto: str) -> str:
     """
-    Converte notação matemática de texto para caracteres Unicode bonitos
-    e remove qualquer vestígio de sintaxe LaTeX.
+    Remove sintaxe LaTeX, limpa marcações Markdown e garante que 
+    todo o texto utilize apenas caracteres totalmente suportados
+    pela fonte Helvetica (Latin-1/ISO-8859-1) do FPDF.
     """
     if not texto:
         return ""
@@ -117,33 +118,32 @@ def formatar_matematica_unicode(texto: str) -> str:
     # 1. Remove qualquer cifrão de LaTeX ($ ou \$)
     texto = re.sub(r'\\?\$', '', texto)
     
-    # 2. Corrige atalhos ruins de limpeza do Gemini (ex: ^{\^n} ou \^)
+    # 2. Converte notações LaTeX brutas para texto plano limpo
     texto = texto.replace('^{\\wedge}', '^').replace('^{\\circ}', '°').replace('\\^', '^')
-    texto = texto.replace('\\_', '_').replace('raiz_', '√')
+    texto = texto.replace('\\_', '_')
+    texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
+    texto = re.sub(r'\\sqrt\[([^}]+)\]\{([^}]+)\}', r'raiz_\1(\2)', texto)
+    texto = re.sub(r'\\sqrt\{([^}]+)\}', r'raiz(\1)', texto)
+    texto = re.sub(r'\\cdot', ' * ', texto)
+    texto = re.sub(r'\\text\{([^}]+)\}', r'\1', texto)
+    texto = re.sub(r'\\[a-zA-Z]+', '', texto)  # Remove outros comandos \comando
     
-    # 3. Mapeamento de sobrescritos (para potências como 2^3 -> 2³)
-    sobrescritos = {
-        '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
-        '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
-        '+': '⁺', '-': '⁻', 'n': 'ⁿ', 'm': 'ᵐ', 'x': 'ˣ'
-    }
+    # 3. Trata potências para notação limpa e segura em Latin-1
+    # Mantém apenas os expoentes suportados pelo Latin-1 (2 e 3)
+    texto = texto.replace('^2', '²').replace('^3', '³')
     
-    def subs_potencia(match):
-        exp = match.group(1)
-        return "".join(sobrescritos.get(c, c) for c in exp)
-
-    # Converte a^(10) ou a^2 para a¹⁰ ou a²
-    texto = re.sub(r'\^\(([^)]+)\)', subs_potencia, texto)
-    texto = re.sub(r'\^([0-9nmx+-])', subs_potencia, texto)
+    # Para expoentes genéricos entre parênteses ou variáveis, usa a notação ^
+    # Exemplo: a^(n) -> a^n, 2^(10) -> 2^10
+    texto = re.sub(r'\^\(([^)]+)\)', r'^\1', texto)
     
-    # 4. Converte termos comuns para Símbolos Elegantes
-    texto = texto.replace('sqrt', '√')
-    texto = texto.replace('\\cdot', '·').replace('*', '·')
+    # 4. Substituição de símbolos por representações textuais seguras
+    texto = texto.replace('sqrt', 'raiz').replace('√', 'raiz')
+    texto = texto.replace('·', '*').replace('×', '*')
     
     # 5. Limpa marcações Markdown restantes
     texto = texto.replace('**', '').replace('`', '')
     
-    # 6. Substitui caracteres incompatíveis com Latin-1 / Helvetica
+    # 6. Mapeamento estrito de caracteres especiais para Latin-1
     substituicoes = {
         '•': '-', '—': '-', '–': '-',
         '“': '"', '”': '"', '‘': "'", '’': "'",
@@ -152,7 +152,8 @@ def formatar_matematica_unicode(texto: str) -> str:
     for orig, dest in substituicoes.items():
         texto = texto.replace(orig, dest)
         
-    return texto.encode('latin-1', 'replace').decode('latin-1')
+    # Garante a conversão sem substituir caracteres por '?'
+    return texto.encode('latin-1', 'replace').decode('latin-1').replace('?', '')
 
 
 def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str) -> bytes:
@@ -171,8 +172,10 @@ def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: st
             pdf.ln(3)
             continue
             
-        # Aplica a formatação e conversão para texto legível
-        texto_limpo = formatar_matematica_unicode(linha_str)
+        # Aplica a limpeza e sanitização para FPDF
+        texto_limpo = sanitizar_texto_latin1(linha_str)
+        if not texto_limpo:
+            continue
             
         # Títulos (#, ##, ###)
         if linha_str.startswith('#'):
@@ -238,15 +241,15 @@ def gerar_conteudo_phc(api_key: str, disciplina: str, ano_escolar: str, assunto:
     4. GABARITO COMENTADO E PEDAGÓGICO
     - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
 
-    REGRAS RÍGIDAS DE FORMATAÇÃO PARA PDF (EXTREMAMENTE IMPORTANTE):
-    1. NUNCA USE NENHUM CIFRÃO ($ OU $$) NO TEXTO. 
-    2. NUNCA USE NENHUM COMANDO LATEX (Proibido usar \\frac, \\sqrt, \\cdot, \\wedge, \\_, etc).
-    3. ESCREVA A MATEMÁTICA EM TEXTO PLANO E DIRETO PARA LEITURA HUMANA:
-       - Use 'a^n' para potências (Ex: 2^10, a^m, 1,1^3).
-       - Use '√a' ou 'raiz_n(a)' para raízes (Ex: √144, √72, raiz_3(27)).
-       - Use 'a / b' para frações simples (Ex: 5/2, 1/4).
-       - Use '·' ou '*' para multiplicação.
-    4. NÃO inclua saudações nem introdução. Comece direto na Seção 1.
+    REGRAS RÍGIDAS DE FORMATAÇÃO E ESCRITA MATEMÁTICA:
+    - É PROIBIDO O USO DE QUALQUER CIFRÃO ($ ou $$).
+    - É PROIBIDO O USO DE COMANDOS LATEX (como \\frac, \\sqrt, \\cdot, \\wedge).
+    - Escreva equações e expressões usando notação de teclado simples:
+      * Use a^n para potências em geral (Exemplo: 2^10, a^n, (1,10)^t). Para ao quadrado/cubo pode usar ² e ³.
+      * Use 'raiz(x)' ou 'raiz_n(x)' para radiciação (Exemplo: raiz(144), raiz_3(27)).
+      * Use 'a / b' para frações (Exemplo: 5 / 2).
+      * Use '*' para multiplicação.
+    - NÃO inclua saudações nem introdução. Comece direto na Seção 1.
     """
 
     response = client.models.generate_content(
@@ -254,7 +257,6 @@ def gerar_conteudo_phc(api_key: str, disciplina: str, ano_escolar: str, assunto:
         contents=prompt,
     )
     return response.text
-
 # --- BARRA LATERAL (SIDEBAR) ---
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/teacher.png", width=70)
