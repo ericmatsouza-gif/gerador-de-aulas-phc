@@ -61,12 +61,41 @@ def get_gemini_client(api_key: str) -> genai.Client:
 
 # ── LIMPEZA E FORMATAÇÃO MATEMÁTICA PARA PDF ───────────────────────────────────
 def sanitizar(texto: str) -> str:
-    """
+     """
     Remove resíduos de LaTeX, cifrões e formata a matemática de forma 
     100% limpa e compatível com as fontes DejaVu do FPDF.
     """
     if not texto:
         return ""
+
+    # 1. Remove qualquer cifrão de LaTeX
+    texto = texto.replace('$', '')
+
+    # 2. Limpa comandos e tags LaTeX comuns que causam ruído
+    texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'(\1-ésima raiz de \2)', texto)
+    texto = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', texto)
+    texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
+    texto = re.sub(r'\\text\{([^}]+)\}', r'\1', texto)
+    texto = re.sub(r'\\[a-zA-Z]+', '', texto)
+
+    # 3. Mapeamento de sobrescritos comuns
+    sobrescritos = {
+        '^0': '⁰', '^1': '¹', '^2': '²', '^3': '³', '^4': '⁴',
+        '^5': '⁵', '^6': '⁶', '^7': '⁷', '^8': '⁸', '^9': '⁹',
+        '^n': 'ⁿ', '^m': 'ᵐ', '^k': 'ᵏ', '^x': 'ˣ', '^t': 'ᵗ',
+        '^(m+n)': 'ᵐ⁺ⁿ', '^(m-n)': 'ᵐ⁻ⁿ', '^(m.n)': 'ᵐ·ⁿ', '^(m·n)': 'ᵐ·ⁿ'
+    }
+    for orig, sub in sobrescritos.items():
+        texto = texto.replace(orig, sub)
+
+    # 4. Troca \cdot por ponto mediano '·', MAS NÃO mexe nos asteriscos (*) do Markdown!
+    texto = texto.replace('\\cdot', ' · ')
+    texto = texto.replace('`', '')
+    
+    # 5. Limpa múltiplos pontos seguidos acidentais que não sejam reticências (...)
+    texto = re.sub(r'(?<!\.)\.\.(?!\.)', '', texto)
+
+    return texto
 
     # 1. Remove qualquer cifrão de LaTeX
     texto = texto.replace('$', '')
@@ -218,7 +247,6 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
     return bytes(pdf.output())
 
 
-# ── GERAÇÃO DE CONTEÚDO VIA GEMINI ────────────────────────────────────────────
 # ── GERAÇÃO DE CONTEÚDO VIA GEMINI COM FALLBACK AUTOMÁTICO ────────────────────
 def gerar_conteudo_phc(client: genai.Client, disciplina: str,
                        ano_escolar: str, assunto: str,
