@@ -59,70 +59,42 @@ def get_gemini_client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
-# ── SANITIZAÇÃO E NORMALIZAÇÃO MATEMÁTICA UNICODE ─────────────────────────────
+# ── LIMPEZA E FORMATAÇÃO MATEMÁTICA PARA PDF ───────────────────────────────────
 def sanitizar(texto: str) -> str:
     """
-    Transforma notações de programação e LaTeX em símbolos matemáticos Unicode
-    extremamente claros e legíveis para alunos do Ensino Fundamental/Médio.
+    Remove resíduos de LaTeX, cifrões e formata a matemática de forma 
+    100% limpa e compatível com as fontes DejaVu do FPDF.
     """
     if not texto:
         return ""
 
-    # Remove cifrões do LaTeX
-    texto = re.sub(r'\$+', '', texto)
+    # 1. Remove qualquer cifrão de LaTeX
+    texto = texto.replace('$', '')
 
-    # Dicionário de sobrescritos Unicode para letras e símbolos comuns
-    mapa_sobrescrito = {
-        '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
-        '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
-        '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
-        'n': 'ⁿ', 'm': 'ᵐ', 'k': 'ᵏ', 'x': 'ˣ', 't': 'ᵗ',
-        'a': 'ᵃ', 'b': 'ᵇ', 'p': 'ᵖ'
-    }
-
-    def para_sobrescrito(match):
-        conteudo = match.group(1)
-        res = []
-        for char in conteudo:
-            res.append(mapa_sobrescrito.get(char, char))
-        return "".join(res)
-
-    # 1. Converte potenciação a^{exp} ou a^exp para caracteres sobrescritos reais
-    texto = re.sub(r'\^\{([^}]+)\}', para_sobrescrito, texto)
-    texto = re.sub(r'\^([0-9nkmxtabp\+\-\(\)]+)', para_sobrescrito, texto)
-
-    # 2. Converte radiciação LaTeX e tipo raiz_n(x) para notação com Radical √
-    # raiz_n(x) ou \sqrt[n]{x} -> ⁿ√(x)
-    texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'^\1√(\2)', texto)
-    texto = re.sub(r'raiz_([a-zA-Z0-9]+)\(([^)]+)\)', r'^\1√(\2)', texto)
-    texto = re.sub(r'\^([a-zA-Z0-9]+)√', para_sobrescrito, texto) # ajusta o índice para sobrescrito
-    
-    # raiz(x) ou \sqrt{x} -> √(x)
+    # 2. Limpa comandos e tags LaTeX comuns que causam ruído
+    texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'(\1-ésima raiz de \2)', texto)
     texto = re.sub(r'\\sqrt\{([^}]+)\}', r'√(\1)', texto)
-    texto = re.sub(r'raiz\(([^)]+)\)', r'√(\1)', texto)
-
-    # 3. Tratamento de Comandos LaTeX Estruturais
     texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
     texto = re.sub(r'\\text\{([^}]+)\}', r'\1', texto)
-    texto = re.sub(r'\\(cdot|times)', ' · ', texto)
-    texto = re.sub(r'\\div\b', ' ÷ ', texto)
-    texto = re.sub(r'\\(left|right|displaystyle|limits|nolimits)', '', texto)
     texto = re.sub(r'\\[a-zA-Z]+', '', texto)
 
-    # 4. Operadores e Símbolos
-    texto = texto.replace('*', ' · ')
-    
-    mapa_simbolos = {
-        r'\times': '×', r'\div': '÷', r'\cdot': '·',
-        r'\approx': '≈', r'\neq': '≠', r'\le': '≤', r'\leq': '≤',
-        r'\ge': '≥', r'\geq': '≥', r'\pm': '±', r'\infty': '∞',
-        r'\rightarrow': '→', r'\Rightarrow': '⇒',
-        r'\pi': 'π', r'\alpha': 'α', r'\beta': 'β', r'\Delta': 'Δ',
+    # 3. Mapeamento de sobrescritos comuns para potências elegantes
+    sobrescritos = {
+        '^0': '⁰', '^1': '¹', '^2': '²', '^3': '³', '^4': '⁴',
+        '^5': '⁵', '^6': '⁶', '^7': '⁷', '^8': '⁸', '^9': '⁹',
+        '^n': 'ⁿ', '^m': 'ᵐ', '^k': 'ᵏ', '^x': 'ˣ', '^t': 'ᵗ',
+        '^(m+n)': 'ᵐ⁺ⁿ', '^(m-n)': 'ᵐ⁻ⁿ', '^(m.n)': 'ᵐ·ⁿ', '^(m·n)': 'ᵐ·ⁿ'
     }
-    for latex, uni in mapa_simbolos.items():
-        texto = texto.replace(latex, uni)
+    for orig, sub in sobrescritos.items():
+        texto = texto.replace(orig, sub)
 
+    # 4. Ajustes finos em símbolos
+    texto = texto.replace('\\cdot', '.').replace('*', '.')
     texto = texto.replace('`', '')
+    
+    # 5. Remove espaços múltiplos e parênteses desnecessários resultantes
+    texto = re.sub(r'\s+', ' ', texto)
+
     return texto
 
 
@@ -221,9 +193,9 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
             pdf.set_text_color(44, 62, 80)
             pdf.ln(2)
 
-        # H3 ─ Sub-subseção
-        elif re.match(r'^### ', s):
-            texto_h = re.sub(r'^### ', '', s)
+        # H3 / H4 ─ Sub-subseção
+        elif re.match(r'^#{3,4}\s+', s):
+            texto_h = re.sub(r'^#{3,4}\s+', '', s)
             pdf.ln(1.5)
             pdf.set_font("DejaVu", "B", 10)
             pdf.set_text_color(41, 128, 185)
@@ -231,7 +203,7 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
             pdf.set_text_color(44, 62, 80)
             pdf.ln(1)
 
-        # Items de Lista (- ou *)
+        # Items de Lista (- ou * ou números)
         elif re.match(r'^[-*]\s+', s):
             texto_item = re.sub(r'^[-*]\s+', '', s)
             pdf.set_x(pdf.l_margin + 3)
@@ -270,7 +242,7 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     {bloco_bncc}
 
     ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
-    1. O conhecimento científico/escolar deve ser tratado como um saber systematizado, produzido
+    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido
        historicamente pela humanidade para responder a necessidades concretas de sobrevivência,
        trabalho e organização social.
     2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA
@@ -295,17 +267,17 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     # 4. GABARITO COMENTADO E PEDAGÓGICO
     - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
 
-    REGRAS RÍGIDAS DE FORMATAÇÃO E NOTAÇÃO MATEMÁTICA DIDÁTICA:
-    - É PROIBIDO o uso de códigos de programação como `a^n`, `a^(m+n)` ou `raiz_n(a)`.
-    - Escreva equações matemáticas de forma Clara e Direta para alunos do ensino básico:
-      * Use caracteres de expoente Unicode: aⁿ, aᵐ⁺ⁿ, aᵐ⁻ⁿ, aᵐ⁻ⁿ, a², a³, 2ⁿ, (1,10)ᵗ.
-      * Use símbolos de radical Unicode reais: √x, ³√x, ⁿ√a. Exemplo: ³√27 = 3, √(144) = 12.
-      * Multiplicação deve ser representada sempre pelo ponto centrado ( · ). Exemplo: a · b.
-      * Frações simples devem ser escritas como: a / b ou (a + b) / c.
-    - É PROIBIDO o uso de qualquer cifrão ($ ou $$) ou sintaxe LaTeX (como \\frac, \\sqrt, \\cdot).
+    REGRAS DE FORMATAÇÃO E NOTAÇÃO MATEMÁTICA DIDÁTICA (MUITO IMPORTANTE):
+    - É STRICTLY PROIBIDO usar código LaTeX (NÃO use $, $$, \\frac, \\sqrt, \\cdot, \\ge, etc).
+    - É PROIBIDO usar notação de programação como a^n ou raiz_n(a).
+    - As equações devem ser escritas de forma textual e limpa para alunos do Ensino Fundamental:
+      * Potências: use a², a³, aⁿ, aᵐ⁺ⁿ, aᵐ⁻ⁿ, 2⁶.
+      * Radicais: use √144 = 12, √x, ³√27 = 3, raiz n-ésima de a, raiz cúbica de x.
+      * Multiplicação: use o ponto simples (.) ou x. Exemplo: a . b
+      * Divisão: use / ou ÷. Exemplo: a / b
     - Use ## para subseções dentro de cada seção principal.
-    - Use **negrito** para termos técnicos, nomes de propriedades e enunciados de questões.
-    - NÃO inclua saudações nem introdução. Comece direto na Seção 1.
+    - Use **negrito** para termos técnicos e enunciados.
+    - NÃO inclua saudações. Comece direto no título '# 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO'.
     """
 
     response = client.models.generate_content(
