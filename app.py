@@ -190,14 +190,25 @@ def gerar_conteudo_phc(api_key: str, disciplina: str, ano_escolar: str, assunto:
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/teacher.png", width=70)
     st.title("Sobre o Autor")
-    st.markdown("**Prof. Mestre Eric Souza da Silva**")
-    st.caption("Especialista em Didática e Pedagogia Histórico-Crítica.")
+    st.markdown("**Prof. Me. Eric Souza da Silva**")
+
+    st.caption("""
+Licenciado em Matemática (UERJ), Mestre em Matemática pelo PROFMAT/UERJ e especialista em Tecnologias Digitais Aplicadas ao Ensino (IFRJ).
+
+Professor de Matemática da Prefeitura de Macaé (Matrícula nº 48.836) e da Prefeitura de Casimiro de Abreu (Matrícula nº 15.035).
+
+Atua em Educação Matemática, Tecnologias Digitais no Ensino, História da Educação Matemática, Políticas Públicas, Educação Ambiental e Esquemas Colaborativos na Educação.
+    """)
+
     st.divider()
+
     st.subheader("📬 Contato & Suporte")
     st.markdown("💬 **WhatsApp:** [(21) 97048-1891](https://wa.me/5521970481891)")
     st.markdown("✉️ **E-mail:** [ericmatsouza@gmail.com](mailto:ericmatsouza@gmail.com)")
+
     st.divider()
-    st.info("💡 Aplicação para geração de materiais didáticos multidisciplinares fundamentados na PHC.")
+
+    st.info("💡 Aplicação para geração de materiais didáticos multidisciplinares.")
 
 # --- INTERFACE PRINCIPAL ---
 st.title("📚 Gerador de Aulas")
@@ -205,7 +216,7 @@ st.title("📚 Gerador de Aulas")
 st.markdown("""
     <div class="author-card">
         <div class="author-name">👨‍🏫 Desenvolvido por Prof. Me. Eric Souza da Silva</div>
-        <div class="author-desc">Plataforma pedagógica para elaboração de materiais didáticos multidisciplinares sob a perspectiva da <b>Pedagogia Histórico-Crítica</b> e <b>Hegemonia Gramsciana</b>.</div>
+        <div class="author-desc">Plataforma pedagógica para elaboração de materiais didáticos.</div>
         <div>
             <a href="https://wa.me/5521970481891" target="_blank" class="contact-badge contact-badge-wa">📱 WhatsApp: (21) 97048-1891</a>
             <a href="mailto:ericmatsouza@gmail.com" class="contact-badge">✉️ ericmatsouza@gmail.com</a>
