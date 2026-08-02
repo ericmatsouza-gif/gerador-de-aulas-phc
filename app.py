@@ -289,7 +289,7 @@ def get_gemini_client(api_key: str) -> genai.Client:
 def gerar_conteudo_phc(client, disciplina, ano_escolar, assunto, codigo_bncc=""):
     prompt = f"Professor PHC. Matéria: {disciplina}, {ano_escolar}. Assunto: {assunto}. BNCC: {codigo_bncc}. Estrutura: # 1. Prática Social, # 2. Fixação, # 3. Leitura Crítica, # 4. Gabarito. Use (a/b) para frações e ^(exp) para potências."
     config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
-    response = client.models.generate_content(model='gemini-1.5-flash', contents=prompt, config=config)
+    response = client.models.generate_content(model='gemini-flash-latest', contents=prompt, config=config)
     return response.text
 
 # --- Interface Streamlit ---
