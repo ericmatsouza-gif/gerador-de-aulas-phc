@@ -326,7 +326,7 @@ def gerar_conteudo_phc(client, disciplina, ano_escolar, assunto, codigo_bncc="")
     - Use **negrito** para termos técnicos.
     """
     config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
-    response = client.models.generate_content(model='gemini-1.5-flash', contents=prompt, config=config)
+    response = client.models.generate_content(model='gemini-flash-latest', contents=prompt, config=config)
     return response.text
 
 # ── INTERFACE STREAMLIT ───────────────────────────────────────────────────────
