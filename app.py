@@ -219,6 +219,7 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
 
 
 # ── GERAÇÃO DE CONTEÚDO VIA GEMINI ────────────────────────────────────────────
+# ── GERAÇÃO DE CONTEÚDO VIA GEMINI COM FALLBACK AUTOMÁTICO ────────────────────
 def gerar_conteudo_phc(client: genai.Client, disciplina: str,
                        ano_escolar: str, assunto: str,
                        codigo_bncc: str = "") -> str:
@@ -242,7 +243,7 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     {bloco_bncc}
 
     ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
-    1. O conhecimento científico/escolar deve ser tratado como um saber systematizado, produzido
+    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido
        historicamente pela humanidade para responder a necessidades concretas de sobrevivência,
        trabalho e organização social.
     2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA
@@ -280,8 +281,12 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     - NÃO inclua saudações. Comece direto no título '# 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO'.
     """
 
-    # Lista de modelos alternativos em ordem de preferência
-    modelos = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
+    # Modelos confirmados na sua chave
+    modelos = [
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-2.5-pro'
+    ]
     
     ultimo_erro = None
     for modelo in modelos:
@@ -292,14 +297,14 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
             )
             return response.text
         except APIError as e:
-            if "503" in str(e) or "UNAVAILABLE" in str(e):
+            # Captura instabilidade (503) ou variações na rota do modelo
+            if any(code in str(e) for code in ["503", "UNAVAILABLE", "404", "NOT_FOUND"]):
                 ultimo_erro = e
-                continue # Tenta o próximo modelo se o atual estiver 503
+                continue
             raise e
             
     if ultimo_erro:
         raise ultimo_erro
-
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
