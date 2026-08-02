@@ -106,28 +106,44 @@ class PDFMaterial(FPDF):
         self.cell(0, 10, f'Página {self.page_no()}/{{nb}}', align='R')
 
 
-def limpar_texto_para_fpdf(texto: str) -> str:
-    """Limpa formatações Markdown, expressões LaTeX e caracteres incompatíveis para FPDF."""
+def formatar_matematica_unicode(texto: str) -> str:
+    """
+    Converte notação matemática de texto para caracteres Unicode bonitos
+    e remove qualquer vestígio de sintaxe LaTeX.
+    """
     if not texto:
         return ""
     
-    # 1. Remove marcadores e delimitações de LaTeX ($...$, \$...\$)
-    texto = re.sub(r'\\?\$', '', texto)  # Remove $ e \$
+    # 1. Remove qualquer cifrão de LaTeX ($ ou \$)
+    texto = re.sub(r'\\?\$', '', texto)
     
-    # 2. Converte comandos simples de LaTeX para texto plano
-    texto = texto.replace('^{\\wedge}', '^')
-    texto = texto.replace('^{\\circ}', '°')
-    texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1/\2)', texto)  # \frac{a}{b} -> (a/b)
-    texto = re.sub(r'\\sqrt\[([^}]+)\]\{([^}]+)\}', r'root(\1, \2)', texto)  # \sqrt[n]{a}
-    texto = re.sub(r'\\sqrt\{([^}]+)\}', r'sqrt(\1)', texto)  # \sqrt{a} -> sqrt(a)
-    texto = re.sub(r'\\cdot', '·', texto)
-    texto = re.sub(r'\\text\{([^}]+)\}', r'\1', texto)
-    texto = re.sub(r'\\[a-zA-Z]+', '', texto)  # Remove outros comandos \comando
+    # 2. Corrige atalhos ruins de limpeza do Gemini (ex: ^{\^n} ou \^)
+    texto = texto.replace('^{\\wedge}', '^').replace('^{\\circ}', '°').replace('\\^', '^')
+    texto = texto.replace('\\_', '_').replace('raiz_', '√')
     
-    # 3. Limpa formatações em negrito/itálico do Markdown
-    texto = texto.replace('**', '').replace('*', '').replace('`', '')
+    # 3. Mapeamento de sobrescritos (para potências como 2^3 -> 2³)
+    sobrescritos = {
+        '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+        '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+        '+': '⁺', '-': '⁻', 'n': 'ⁿ', 'm': 'ᵐ', 'x': 'ˣ'
+    }
     
-    # 4. Substituição de caracteres especiais incompatíveis com Helvetica (Latin-1)
+    def subs_potencia(match):
+        exp = match.group(1)
+        return "".join(sobrescritos.get(c, c) for c in exp)
+
+    # Converte a^(10) ou a^2 para a¹⁰ ou a²
+    texto = re.sub(r'\^\(([^)]+)\)', subs_potencia, texto)
+    texto = re.sub(r'\^([0-9nmx+-])', subs_potencia, texto)
+    
+    # 4. Converte termos comuns para Símbolos Elegantes
+    texto = texto.replace('sqrt', '√')
+    texto = texto.replace('\\cdot', '·').replace('*', '·')
+    
+    # 5. Limpa marcações Markdown restantes
+    texto = texto.replace('**', '').replace('`', '')
+    
+    # 6. Substitui caracteres incompatíveis com Latin-1 / Helvetica
     substituicoes = {
         '•': '-', '—': '-', '–': '-',
         '“': '"', '”': '"', '‘': "'", '’': "'",
@@ -136,7 +152,6 @@ def limpar_texto_para_fpdf(texto: str) -> str:
     for orig, dest in substituicoes.items():
         texto = texto.replace(orig, dest)
         
-    # Garante codificação Latin-1 sem estourar exceção
     return texto.encode('latin-1', 'replace').decode('latin-1')
 
 
@@ -156,17 +171,17 @@ def gerar_pdf_fpdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: st
             pdf.ln(3)
             continue
             
-        # Aplica a limpeza de texto e LaTeX
-        texto_limpo = limpar_texto_para_fpdf(linha_str)
+        # Aplica a formatação e conversão para texto legível
+        texto_limpo = formatar_matematica_unicode(linha_str)
             
         # Títulos (#, ##, ###)
         if linha_str.startswith('#'):
             texto_titulo = re.sub(r'^#+\s*', '', texto_limpo)
-            pdf.set_font('Helvetica', 'B', 12)
+            pdf.set_font('Helvetica', 'B', 11)
             pdf.set_text_color(26, 42, 58)
             pdf.ln(3)
             pdf.multi_cell(largura_util, 6, texto_titulo)
-            pdf.ln(2)
+            pdf.ln(1)
             
         # Tópicos (- ou *)
         elif linha_str.startswith('- ') or linha_str.startswith('* '):
@@ -198,7 +213,7 @@ def gerar_conteudo_phc(api_key: str, disciplina: str, ano_escolar: str, assunto:
     - Conteúdo/Assunto: {assunto}
 
     ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
-    1. O conhecimento científico/escolar deve ser tratado como um saber systematizado, produzido historicamente 
+    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido historicamente 
        pela humanidade para responder a necessidades concretas de sobrevivência, trabalho e organização social.
     2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA REALIDADE, 
        capacitando os sujeitos (especialmente das classes populares) para o AUTOGOVERNO, a interpretação da sociedade, 
@@ -223,15 +238,15 @@ def gerar_conteudo_phc(api_key: str, disciplina: str, ano_escolar: str, assunto:
     4. GABARITO COMENTADO E PEDAGÓGICO
     - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
 
-    REGRAS CRÍTICAS DE FORMATO DE TEXTO (OBRIGATÓRIO PARA GERAÇÃO DE PDF):
-    - NUNCA USE SINTAXE LATEX (PROIBIDO usar cifrões como $, $$, comandos como \\frac, \\sqrt, \\cdot, etc).
-    - Escreva expressões matemáticas de forma simples em TEXTO PLANO legível. Exemplos: 
-      * Use a^b para potências (exemplo: 2^10, a^n).
-      * Use sqrt(x) ou raiz(x) para raízes.
-      * Use a / b para frações simples (exemplo: 5/2).
-      * Use * ou · para multiplicação.
-    - NUNCA use o asterisco (*) isolado no meio de uma linha.
-    - NÃO inclua saudações nem introdução. Comece direto na Seção 1.
+    REGRAS RÍGIDAS DE FORMATAÇÃO PARA PDF (EXTREMAMENTE IMPORTANTE):
+    1. NUNCA USE NENHUM CIFRÃO ($ OU $$) NO TEXTO. 
+    2. NUNCA USE NENHUM COMANDO LATEX (Proibido usar \\frac, \\sqrt, \\cdot, \\wedge, \\_, etc).
+    3. ESCREVA A MATEMÁTICA EM TEXTO PLANO E DIRETO PARA LEITURA HUMANA:
+       - Use 'a^n' para potências (Ex: 2^10, a^m, 1,1^3).
+       - Use '√a' ou 'raiz_n(a)' para raízes (Ex: √144, √72, raiz_3(27)).
+       - Use 'a / b' para frações simples (Ex: 5/2, 1/4).
+       - Use '·' ou '*' para multiplicação.
+    4. NÃO inclua saudações nem introdução. Comece direto na Seção 1.
     """
 
     response = client.models.generate_content(
