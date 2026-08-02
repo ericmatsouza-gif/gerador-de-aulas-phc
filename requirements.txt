@@ -1,3 +1,5 @@
-flask
-google-generativeai
-reportlab
+streamlit
+google-genai
+fpdf2
+matplotlib
+pillow
