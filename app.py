@@ -30,7 +30,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── RENDERIZADOR ROBUSTO (PHCRenderer) ─────────────────────────────────────────
+# ── RENDERIZADOR PHC (VERSÃO CORRIGIDA) ────────────────────────────────────────
 class PHCRenderer:
     def __init__(self, pdf, font_name="DejaVu", base_size=10):
         self.pdf = pdf
@@ -52,13 +52,28 @@ class PHCRenderer:
 
     def _safe_write(self, text):
         if not text: return
+        
+        # Fallback para caracteres não-latin1 se usar helvetica
         if self.pdf.font_family.lower() == "helvetica":
             text = text.encode('latin-1', 'replace').decode('latin-1')
+            
+        self._apply_style()
+        
         if self.y_offset != 0:
-            x, y = self.pdf.get_x(), self.pdf.get_y()
-            self.pdf.set_y(y + self.y_offset)
+            # Salva posição atual
+            x_old = self.pdf.get_x()
+            y_old = self.pdf.get_y()
+            
+            # Aplica offset relativo
+            self.pdf.set_y(y_old + self.y_offset)
+            self.pdf.set_x(x_old)
+            
             self.pdf.write(self.line_height, text)
-            self.pdf.set_xy(self.pdf.get_x(), y)
+            
+            # Volta para a linha base, mas mantém o X onde o texto terminou
+            # Importante: se o texto causou quebra de linha, o Y novo deve ser respeitado
+            y_diff = self.pdf.get_y() - (y_old + self.y_offset)
+            self.pdf.set_y(y_old + y_diff)
         else:
             self.pdf.write(self.line_height, text)
 
@@ -66,21 +81,33 @@ class PHCRenderer:
         if self.in_exponent:
             self._safe_write(f"({num_text}/{den_text})")
             return
+            
         x0, y0 = self.pdf.get_x(), self.pdf.get_y()
         old_mult = self.size_mult
-        self.size_mult *= 0.85
+        self.size_mult *= 0.8
         self._apply_style()
+        
         w_num = self.pdf.get_string_width(num_text)
         w_den = self.pdf.get_string_width(den_text)
         w_frac = max(w_num, w_den) + 2
-        h_cell = self.line_height * 0.7
-        self.pdf.set_xy(x0 + (w_frac - w_num)/2, y0 - h_cell/2 - 0.5)
-        self.pdf.write(h_cell, num_text)
+        
+        # Altura da célula reduzida para frações
+        h_frac = self.line_height * 0.8
+        
+        # Numerador
+        self.pdf.set_xy(x0 + (w_frac - w_num)/2, y0 - h_frac/2)
+        self.pdf.write(h_frac, num_text)
+        
+        # Linha da fração
         self.pdf.set_draw_color(44, 62, 80)
         self.pdf.set_line_width(0.2)
         self.pdf.line(x0, y0 + self.line_height/2, x0 + w_frac, y0 + self.line_height/2)
-        self.pdf.set_xy(x0 + (w_frac - w_den)/2, y0 + h_cell/2 + 0.5)
-        self.pdf.write(h_cell, den_text)
+        
+        # Denominador
+        self.pdf.set_xy(x0 + (w_frac - w_den)/2, y0 + h_frac/2)
+        self.pdf.write(h_frac, den_text)
+        
+        # Reposiciona cursor após a fração
         self.pdf.set_xy(x0 + w_frac + 1, y0)
         self.size_mult = old_mult
         self._apply_style()
@@ -92,24 +119,24 @@ class PHCRenderer:
                 self.bold = not self.bold
                 i += 2
                 continue
+            
             if text[i] == "^":
                 i += 1
                 content = ""
                 if i < len(text) and text[i] == "(":
                     i += 1
-                    balance = 1
-                    start = i
+                    balance, start = 1, i
                     while i < len(text) and balance > 0:
                         if text[i] == "(": balance += 1
                         elif text[i] == ")": balance -= 1
                         if balance > 0: i += 1
-                    content = text[start:i]
-                    i += 1
+                    content, i = text[start:i], i + 1
                 else:
                     start = i
                     while i < len(text) and (text[i].isalnum() or text[i] in "+-"):
                         i += 1
                     content = text[start:i]
+                
                 old_mult, old_y, old_exp = self.size_mult, self.y_offset, self.in_exponent
                 self.size_mult *= 0.7
                 self.y_offset -= 2.5
@@ -117,6 +144,7 @@ class PHCRenderer:
                 self.render_span(content)
                 self.size_mult, self.y_offset, self.in_exponent = old_mult, old_y, old_exp
                 continue
+                
             if text[i] == "(":
                 balance, j, slash_pos = 1, i + 1, -1
                 while j < len(text) and balance > 0:
@@ -129,6 +157,7 @@ class PHCRenderer:
                     self.draw_fraction(num, den)
                     i = j + 1
                     continue
+            
             match_raiz = re.match(r'(?:raiz|\d*√)\(', text[i:])
             if match_raiz:
                 prefix = match_raiz.group(0)[:-1]
@@ -147,6 +176,7 @@ class PHCRenderer:
                 self.pdf.set_line_width(0.2)
                 self.pdf.line(x_start, y_root + 0.8, self.pdf.get_x(), y_root + 0.8)
                 continue
+                
             self._safe_write(text[i])
             i += 1
 
@@ -154,17 +184,29 @@ class PHCRenderer:
         if not text.strip():
             self.pdf.ln(self.line_height)
             return
-        match_list = re.match(r'^(\s*)([-*•]|\d+\.)\s+', text)
+            
+        # Detecta listas para aplicar recuo
+        match_list = re.match(r'^(\s*)([-*•]|\d+\.|\w\))\s+', text)
+        old_margin = self.pdf.l_margin
+        
         if match_list:
             bullet = match_list.group(2)
-            indent = len(match_list.group(1)) * 2 + 5
-            text = text[len(match_list.group(0)):]
-            self.pdf.set_x(self.pdf.l_margin + indent - 5)
+            # Recuo fixo para listas para evitar desalinhamento em quebras de linha
+            indent = 10 
+            text_content = text[len(match_list.group(0)):]
+            
+            self.pdf.set_x(old_margin)
             self._safe_write(bullet + " ")
-            self.pdf.set_x(self.pdf.l_margin + indent)
-        else:
+            
+            # Ajusta margem esquerda temporariamente para que o texto quebre alinhado
+            self.pdf.l_margin = old_margin + indent
             self.pdf.set_x(self.pdf.l_margin)
-        self.render_span(text)
+            self.render_span(text_content)
+        else:
+            self.pdf.set_x(old_margin)
+            self.render_span(text)
+            
+        self.pdf.l_margin = old_margin
         self.pdf.ln(self.line_height + 2)
 
 # ── LOCALIZAÇÃO DE FONTES ─────────────────────────────────────────────────────
@@ -179,24 +221,27 @@ FONT_DIR = _localizar_fontes_dejavu()
 # ── SANITIZAÇÃO ───────────────────────────────────────────────────────────────
 def sanitizar(texto: str) -> str:
     if not texto: return ""
+    # Substituições de caracteres Unicode para evitar quebras em fontes padrão
     texto = texto.replace("—", "--").replace("–", "-").replace("“", "\"").replace("”", "\"").replace("‘", "'").replace("’", "'").replace("•", "-")
+    
+    # Remove repetições acidentais de blocos de texto ou números
     texto = re.sub(r'(\d{4,})\1', r'\1', texto)
-    texto = re.sub(r'([A-Za-z0-9=×+/\-^√()]{6,})\1', r'\1', texto)
+    texto = re.sub(r'([A-Za-z0-9=×+/\-^√()]{8,})\1', r'\1', texto)
+    
+    # Limpeza de LaTeX
     texto = re.sub(r'\$+', '', texto)
     texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
     texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'\1√(\2)', texto)
     texto = re.sub(r'\\sqrt\{([^}]+)\}',             r'raiz(\1)',     texto)
-    texto = re.sub(r'\\text\{([^}]+)\}',             r'\1',           texto)
     texto = re.sub(r'\\(cdot|times)',   ' · ', texto)
     texto = re.sub(r'\\div\b',          ' / ',  texto)
-    texto = re.sub(r'\\(left|right|displaystyle|limits|nolimits)', '', texto)
-    texto = re.sub(r'\\[a-zA-Z]+', '', texto)
     texto = re.sub(r'\^\{([^}]+)\}', r'^(\1)', texto)
-    mapa_simb = {'\\approx': '≈', '\\neq': '≠', '\\le': '≤', '\\leq': '≤', '\\ge': '≥', '\\geq': '≥', '\\pm': '±', '\\infty': '∞', '\\rightarrow': '→', '\\Rightarrow': '⇒', '\\pi': 'π', '\\alpha': 'α', '\\beta': 'β', '\\Delta': 'Δ'}
+    
+    mapa_simb = {'\\approx': '≈', '\\neq': '≠', '\\le': '≤', '\\leq': '≤', '\\ge': '≥', '\\geq': '≥', '\\pm': '±', '\\infty': '∞', '\\pi': 'π', '\\Delta': 'Δ'}
     for k, v in mapa_simb.items(): texto = texto.replace(k, v)
+    
     texto = texto.replace('<=>', '⟺').replace('=>', '⇒').replace('>=', '≥').replace('<=', '≤').replace('!=', '≠')
     texto = re.sub(r'(?<=[0-9a-zA-Z\)])\s*\*\s*(?=[0-9a-zA-Z\(])', ' · ', texto)
-    texto = re.sub(r'^-{3,}$', '', texto.strip()) if re.match(r'^-{3,}$', texto.strip()) else texto
     texto = re.sub(r'(?<![*])\*([^*\n]+?)\*(?![*])', r'\1', texto)
     texto = texto.replace('`', '')
     return texto
@@ -266,19 +311,18 @@ def compilar_pdf(texto_md: str, disciplina: str, ano_escolar: str, assunto: str)
             pdf.ln(2)
         elif re.match(r'^#{3,4}\s+', s):
             pdf.ln(2)
-            renderer.render_line(re.sub(r'^#{3,4}\s+', '**', s) + '**')
+            renderer.render_line("**" + re.sub(r'^#{3,4}\s+', '', s) + "**")
         else:
             renderer.render_line(linha)
-    # CORREÇÃO CRÍTICA: Converter bytearray para bytes
     return bytes(pdf.output())
 
-# ── LOGICA DE GERAÇÃO E UI ────────────────────────────────────────────────────
+# ── LÓGICA DE GERAÇÃO E UI ────────────────────────────────────────────────────
 @st.cache_resource
 def get_gemini_client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key)
 
 def gerar_conteudo_phc(client, disciplina, ano_escolar, assunto, codigo_bncc=""):
-    prompt = f"Professor PHC. Matéria: {disciplina}, {ano_escolar}. Assunto: {assunto}. BNCC: {codigo_bncc}. Estrutura: # 1. Prática Social, # 2. Fixação, # 3. Leitura Crítica, # 4. Gabarito. Use (a/b) para frações e ^(exp) para potências."
+    prompt = f"Professor PHC. Matéria: {disciplina}, {ano_escolar}. Assunto: {assunto}. BNCC: {codigo_bncc}. Estrutura: # 1. Prática Social, # 2. Fixação, # 3. Leitura Crítica, # 4. Gabarito. Use (a/b) para frações e ^(exp) para potências. Evite LaTeX complexo."
     config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
     response = client.models.generate_content(model='gemini-flash-latest', contents=prompt, config=config)
     return response.text
