@@ -4,6 +4,7 @@ import streamlit as st
 from google import genai
 from google.genai.errors import APIError
 from fpdf import FPDF
+import matplotlib
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerador de Aulas", page_icon="📚", layout="centered")
@@ -36,7 +37,26 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── FONTES DejaVu (TTF Unicode — suporte completo a pt-BR e matemática) ────────
-FONT_DIR = "/usr/share/fonts/truetype/dejavu/"
+def _localizar_fontes_dejavu() -> str:
+    """
+    Retorna o diretório com as fontes DejaVu TTF.
+    Tenta primeiro o caminho do sistema; se não existir, usa o bundled
+    do matplotlib, que está presente em qualquer ambiente com matplotlib
+    instalado — inclusive no Streamlit Community Cloud.
+    """
+    sistema = "/usr/share/fonts/truetype/dejavu"
+    if os.path.isfile(os.path.join(sistema, "DejaVuSans.ttf")):
+        return sistema + "/"
+    mpl_dir = os.path.join(
+        os.path.dirname(matplotlib.__file__), "mpl-data", "fonts", "ttf"
+    )
+    if os.path.isfile(os.path.join(mpl_dir, "DejaVuSans.ttf")):
+        return mpl_dir + "/"
+    raise FileNotFoundError(
+        "Fontes DejaVu não encontradas. Instale fonts-dejavu-core ou matplotlib."
+    )
+
+FONT_DIR = _localizar_fontes_dejavu()
 
 
 # ── CACHE DO CLIENTE GEMINI ────────────────────────────────────────────────────
