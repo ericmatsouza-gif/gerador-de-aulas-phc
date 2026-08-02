@@ -281,8 +281,9 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     - NÃO inclua saudações. Comece direto no título '# 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO'.
     """
 
-    # Modelos confirmados na sua chave
+    # Lista de modelos ordenada por prioridade (incluindo gemini-flash-latest)
     modelos = [
+        'gemini-flash-latest',
         'gemini-2.5-flash',
         'gemini-2.0-flash',
         'gemini-2.5-pro'
@@ -297,15 +298,15 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
             )
             return response.text
         except APIError as e:
-            # Captura instabilidade (503) ou variações na rota do modelo
-            if any(code in str(e) for code in ["503", "UNAVAILABLE", "404", "NOT_FOUND"]):
+            msg_erro = str(e).upper()
+            # Captura erros de cota (429/quota), indisponibilidade (503/unavailable) e modelo inexistente (404/not_found)
+            if any(codigo in msg_erro for codigo in ["503", "UNAVAILABLE", "404", "NOT_FOUND", "429", "RESOURCE_EXHAUSTED", "QUOTA"]):
                 ultimo_erro = e
-                continue
+                continue  # Pula para o próximo modelo da lista
             raise e
             
     if ultimo_erro:
         raise ultimo_erro
-
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/teacher.png", width=70)
