@@ -171,36 +171,23 @@ class PDFMaterial(FPDF):
         self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", align="R")
 
 
-# ── ESCREVER PARÁGRAFO COM NEGRITO E FRAÇÕES VERTICAIS INLINE ──────────────────
+
+# ── ESCREVER PARÁGRAFO COM NEGRITO (SEM GERAR IMAGENS - LEVE E RÁPIDO) ─────────
 def escrever_texto_formatado(pdf: FPDF, texto: str, recuo_x: float = 0):
     pdf.set_x(pdf.l_margin + recuo_x)
     
-    # Processa blocos de texto e tags \frac{num}{den}
-    partes_fracao = re.split(r'(\\frac\{[^}]+\}\{[^}]+\})', texto)
-
-    for subtexto in partes_fracao:
-        match_frac = re.match(r'\\frac\{([^}]+)\}\{([^}]+)\}', subtexto)
-        if match_frac:
-            num, den = match_frac.group(1), match_frac.group(2)
-            img_bytes = gerar_imagem_fracao(num, den)
-            img_stream = io.BytesIO(img_bytes)
-            
-            x_atual = pdf.get_x()
-            y_atual = pdf.get_y()
-            pdf.image(img_stream, x=x_atual, y=y_atual - 2.5, h=7.5)
-            pdf.set_x(x_atual + 9)
+    # Divide o texto pelas marcas de negrito (**texto**)
+    partes_bold = re.split(r'(\*\*.*?\*\*)', texto)
+    for parte in partes_bold:
+        if not parte:
+            continue
+        if parte.startswith('**') and parte.endswith('**'):
+            conteudo = parte[2:-2]
+            pdf.set_font("DejaVu", "B", 10)
         else:
-            partes_bold = re.split(r'(\*\*.*?\*\*)', subtexto)
-            for parte in partes_bold:
-                if not parte:
-                    continue
-                if parte.startswith('**') and parte.endswith('**'):
-                    conteudo = parte[2:-2]
-                    pdf.set_font("DejaVu", "B", 10)
-                else:
-                    conteudo = parte
-                    pdf.set_font("DejaVu", "", 10)
-                pdf.write(5.5, conteudo)
+            conteudo = parte
+            pdf.set_font("DejaVu", "", 10)
+        pdf.write(5.5, conteudo)
 
     pdf.ln(6)
 
@@ -316,14 +303,14 @@ def gerar_conteudo_phc(client: genai.Client, disciplina: str,
     - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
 
     REGRAS DE FORMATAÇÃO E NOTAÇÃO MATEMÁTICA DIDÁTICA (MUITO IMPORTANTE):
-    - Para frações, use OBRIGATORIAMENTE a notação: \\frac{{numerador}}{{denominador}}.
+    - É PROIBIDO usar a sintaxe \frac{a}{b} do LaTeX.
+    - Para frações, use a notação em linha limpa: (a / b) ou a / b. Exemplo: (a + b) / 2, 3 / 4.
     - Para potências, use notação limpa Unicode (a², a³, aⁿ, aᵐ⁺ⁿ, 2⁶).
     - Radicais: use √144 = 12, √x, ³√27 = 3.
     - Multiplicação: use o ponto simples (.) ou x. Exemplo: a . b
     - Use ## para subseções dentro de cada seção principal.
     - Use **negrito** para termos técnicos e enunciados.
     - NÃO inclua saudações. Comece direto no título '# 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO'.
-    """
 
     modelos = [
         'gemini-flash-latest',
