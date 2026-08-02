@@ -51,13 +51,9 @@ class PHCRenderer:
             self.pdf.set_font("helvetica", style, size)
 
     def _safe_write(self, text):
-        """Escreve texto tratando caracteres não suportados pela fonte atual."""
         if not text: return
-        
-        # Se estiver usando helvetica, remove caracteres fora do range latin-1
         if self.pdf.font_family.lower() == "helvetica":
             text = text.encode('latin-1', 'replace').decode('latin-1')
-            
         if self.y_offset != 0:
             x, y = self.pdf.get_x(), self.pdf.get_y()
             self.pdf.set_y(y + self.y_offset)
@@ -183,20 +179,9 @@ FONT_DIR = _localizar_fontes_dejavu()
 # ── SANITIZAÇÃO ───────────────────────────────────────────────────────────────
 def sanitizar(texto: str) -> str:
     if not texto: return ""
-    
-    # 1. Substituições de Segurança (Unicode -> ASCII/Latin1)
-    # Isso resolve o erro do caractere "—" (em-dash) em fontes helvetica
-    texto = texto.replace("—", "--")  # Em-dash
-    texto = texto.replace("–", "-")   # En-dash
-    texto = texto.replace("“", "\"").replace("”", "\"") # Aspas inteligentes
-    texto = texto.replace("‘", "'").replace("’", "'")   # Aspas simples inteligentes
-    texto = texto.replace("•", "-")   # Bullet point
-    
-    # 2. Remove duplicatas de números longos (4+ dígitos) ou expressões coladas
+    texto = texto.replace("—", "--").replace("–", "-").replace("“", "\"").replace("”", "\"").replace("‘", "'").replace("’", "'").replace("•", "-")
     texto = re.sub(r'(\d{4,})\1', r'\1', texto)
     texto = re.sub(r'([A-Za-z0-9=×+/\-^√()]{6,})\1', r'\1', texto)
-    
-    # 3. Comandos LaTeX e outros
     texto = re.sub(r'\$+', '', texto)
     texto = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1 / \2)', texto)
     texto = re.sub(r'\\sqrt\[([^\]]+)\]\{([^}]+)\}', r'\1√(\2)', texto)
@@ -207,15 +192,8 @@ def sanitizar(texto: str) -> str:
     texto = re.sub(r'\\(left|right|displaystyle|limits|nolimits)', '', texto)
     texto = re.sub(r'\\[a-zA-Z]+', '', texto)
     texto = re.sub(r'\^\{([^}]+)\}', r'^(\1)', texto)
-    
-    mapa_simb = {
-        '\\approx': '≈', '\\neq': '≠', '\\le': '≤', '\\leq': '≤',
-        '\\ge': '≥', '\\geq': '≥', '\\pm': '±', '\\infty': '∞',
-        '\\rightarrow': '→', '\\Rightarrow': '⇒',
-        '\\pi': 'π', '\\alpha': 'α', '\\beta': 'β', '\\Delta': 'Δ',
-    }
+    mapa_simb = {'\\approx': '≈', '\\neq': '≠', '\\le': '≤', '\\leq': '≤', '\\ge': '≥', '\\geq': '≥', '\\pm': '±', '\\infty': '∞', '\\rightarrow': '→', '\\Rightarrow': '⇒', '\\pi': 'π', '\\alpha': 'α', '\\beta': 'β', '\\Delta': 'Δ'}
     for k, v in mapa_simb.items(): texto = texto.replace(k, v)
-    
     texto = texto.replace('<=>', '⟺').replace('=>', '⇒').replace('>=', '≥').replace('<=', '≤').replace('!=', '≠')
     texto = re.sub(r'(?<=[0-9a-zA-Z\)])\s*\*\s*(?=[0-9a-zA-Z\(])', ' · ', texto)
     texto = re.sub(r'^-{3,}$', '', texto.strip()) if re.match(r'^-{3,}$', texto.strip()) else texto
@@ -299,8 +277,9 @@ def get_gemini_client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key)
 
 def gerar_conteudo_phc(client, disciplina, ano_escolar, assunto, codigo_bncc=""):
-    prompt = f"Você é um Professor de Matemática especializado na Pedagogia Histórico-Crítica (PHC). Elabore um material didático completo para a disciplina de {disciplina}, voltado para o {ano_escolar}, sobre o assunto: {assunto}. BNCC: {codigo_bncc}. Estrutura: # 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA, # 2. EXERCÍCIOS DE FIXAÇÃO, # 3. DESAFIOS DE LEITURA CRÍTICA, # 4. GABARITO COMENTADO. Use (a/b) para frações e ^(exp) para potências. NÃO use LaTeX."
+    prompt = f"Professor PHC. Matéria: {disciplina}, {ano_escolar}. Assunto: {assunto}. BNCC: {codigo_bncc}. Estrutura: # 1. Prática Social, # 2. Fixação, # 3. Leitura Crítica, # 4. Gabarito. Use (a/b) para frações e ^(exp) para potências."
     config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
+    # USO OBRIGATÓRIO DO MODELO FLASH LATEST
     response = client.models.generate_content(model='gemini-flash-latest', contents=prompt, config=config)
     return response.text
 
@@ -330,12 +309,17 @@ if st.button("✨ Gerar Material Didático"):
     if not api_key or not disciplina or not ano_escolar or not assunto: st.warning("Preencha os campos.")
     else:
         try:
-            with st.spinner("🧠 Gerando..."):
+            with st.spinner("🧠 Elaborando material (Gemini Flash)..."):
                 client = get_gemini_client(api_key)
                 st.session_state.conteudo_md = gerar_conteudo_phc(client, disciplina, ano_escolar, assunto, codigo_bncc)
                 st.session_state.ultima_disciplina, st.session_state.ultimo_ano, st.session_state.ultimo_assunto = disciplina, ano_escolar, assunto
             st.success("✅ Gerado!")
-        except Exception as e: st.error(f"❌ Erro: {e}")
+        except APIError as e:
+            if "503" in str(e) or "unavailable" in str(e).lower():
+                st.error("⚠️ O servidor do Google está com alta demanda no momento (Erro 503). Por favor, aguarde alguns segundos e tente clicar no botão novamente.")
+            else:
+                st.error(f"❌ Erro na API Gemini: {e}")
+        except Exception as e: st.error(f"❌ Erro inesperado: {e}")
 
 if st.session_state.conteudo_md:
     st.divider()
