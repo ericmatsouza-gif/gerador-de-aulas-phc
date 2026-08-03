@@ -252,18 +252,19 @@ def _renderizar_tokens(pdf: FPDF, renderer: TextRenderer, texto: str):
 
 
 # ── CLASSE PDF ────────────────────────────────────────────────────────────────
+# ── CLASSE PDF ────────────────────────────────────────────────────────────────
 class PDFMaterial(FPDF):
     def __init__(self, disciplina: str, ano_escolar: str, assunto: str):
         super().__init__()
-        self.disciplina = disciplina
+        self.disciplina  = disciplina
         self.ano_escolar = ano_escolar
-        self.assunto = assunto
+        self.assunto     = assunto
         if FONT_DIR:
-            self.add_font("DejaVu", style="", fname=os.path.join(FONT_DIR, "DejaVuSans.ttf"))
+            self.add_font("DejaVu", style="",  fname=os.path.join(FONT_DIR, "DejaVuSans.ttf"))
             self.add_font("DejaVu", style="B", fname=os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"))
             self.add_font("DejaVu", style="I", fname=os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf"))
 
-      def header(self):
+    def header(self):
         # Renderiza o cabeçalho APENAS na primeira página
         if self.page_no() == 1:
             fonte = "DejaVu" if FONT_DIR else "helvetica"
