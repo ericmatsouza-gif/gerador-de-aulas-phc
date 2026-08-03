@@ -66,7 +66,7 @@ def latex_para_png(expr: str, dpi: int = 110) -> bytes | None:
 
 def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
     """
-    Insere PNG LaTeX preservando perfeitamente a linha de base (Y) do texto.
+    Insere PNG LaTeX preservando a linha de base ou forçando quebra em fórmulas de bloco (display).
     """
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp.write(png_bytes)
@@ -77,18 +77,24 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
         with PILImage.open(io.BytesIO(png_bytes)) as img:
             w_px, h_px = img.size
 
-        px_to_mm = 0.22  # Conversão ajustada para DPI 110
+        px_to_mm = 0.22  # Conversão para DPI 110
 
         if is_display:
             h = min(h_px * px_to_mm, 12.0)
             w = h * (w_px / h_px)
             
-            pdf.ln(3)
+            # Força a quebra de linha e vai para a margem esquerda antes do bloco
+            pdf.ln(6.5)
+            pdf.set_x(pdf.l_margin)
+            
             x_centro = pdf.l_margin + (pdf.epw - w) / 2
             pdf.image(tmp_path, x=x_centro, y=pdf.get_y(), h=h, w=w)
-            pdf.ln(h + 3)
+            
+            # Avança a altura da imagem + espaçamento e reseta o X
+            pdf.set_y(pdf.get_y() + h + 3)
+            pdf.set_x(pdf.l_margin)
         else:
-            # Salva o Y original da linha antes de inserir a imagem
+            # Salva o Y original da linha antes de inserir a imagem inline
             y_base = pdf.get_y()
 
             # Espaçamento de guarda antes da imagem
@@ -109,7 +115,7 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
 
             pdf.image(tmp_path, x=x_img, y=y_img, h=h, w=w)
 
-            # Restauramos exatamente a coordenada Y original da linha de texto
+            # Restaura exatamente a coordenada Y original da linha de texto
             pdf.set_xy(x_img + w + 1.2, y_base)
     finally:
         os.unlink(tmp_path)
