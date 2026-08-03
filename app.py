@@ -1,4 +1,4 @@
-#FUNCIONA
+# FUNCIONA
 import os
 import re
 import io
@@ -53,32 +53,23 @@ FONT_DIR = _localizar_fontes_dejavu()
 # ── CODECOGS: LaTeX → PNG ─────────────────────────────────────────────────────
 CODECOGS_URL = "https://latex.codecogs.com/png.image?"
 
-def sanitizar_latex(expr: str) -> str:
-    """Ajusta o código LaTeX para garantir renderização perfeita no CodeCogs."""
-    expr = expr.strip()
-    # Se for apenas uma letra isolada (ex: x, a, b, c), força formatação limpa
-    if len(expr) == 1 and expr.isalpha():
-        return f"\\mathit{{{expr}}}"
-    return expr
 
-def latex_para_png(expr: str, dpi: int = 180) -> bytes | None:
-    """Baixa PNG da expressão LaTeX via Codecogs com DPI alto."""
-    expr_limpa = sanitizar_latex(expr)
-    
-    # Força fundo transparente/branco e DPI alto para nitidez
-    params = f"\\dpi{{{dpi}}}\\bg{{white}}{expr_limpa}"
-    url = CODECOGS_URL + requests.utils.quote(params)
-    
+def latex_para_png(expr: str, dpi: int = 110) -> bytes | None:
+    """Baixa PNG da expressão LaTeX via Codecogs com DPI ajustado para fonte 10pt."""
+    params = f"\\dpi{{{dpi}}}\\bg{{white}}{expr}"
     try:
-        resp = requests.get(url, timeout=8)
-        if resp.status_code == 200 and resp.content and len(resp.content) > 100:
+        resp = requests.get(CODECOGS_URL + requests.utils.quote(params), timeout=8)
+        if resp.status_code == 200 and resp.content:
             return resp.content
-    except Exception as e:
-        print(f"Erro ao baixar LaTeX ({expr}): {e}")
+    except Exception:
+        pass
     return None
-    
+
+
 def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
-    """Insere o PNG do LaTeX com escala e baseline ajustados."""
+    """
+    Insere PNG LaTeX preservando a linha de base ou forçando quebra em fórmulas de bloco (display).
+    """
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp.write(png_bytes)
         tmp_path = tmp.name
@@ -88,100 +79,107 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
         with PILImage.open(io.BytesIO(png_bytes)) as img:
             w_px, h_px = img.size
 
-        # Fator de conversão para DPI 180
-        px_to_mm = 0.141
+        px_to_mm = 0.22  # Conversão para DPI 110
 
         if is_display:
-            h = min(h_px * px_to_mm, 16.0)
+            h = min(h_px * px_to_mm, 12.0)
             w = h * (w_px / h_px)
 
-            pdf.ln(5)
+            # Força a quebra de linha e vai para a margem esquerda antes do bloco
+            pdf.ln(6.5)
+            pdf.set_x(pdf.l_margin)
+
             x_centro = pdf.l_margin + (pdf.epw - w) / 2
             pdf.image(tmp_path, x=x_centro, y=pdf.get_y(), h=h, w=w)
-            pdf.set_y(pdf.get_y() + h + 4)
+
+            # Avança a altura da imagem + espaçamento e reseta o X
+            pdf.set_y(pdf.get_y() + h + 3)
             pdf.set_x(pdf.l_margin)
         else:
+            # Salva o Y original da linha antes de inserir a imagem inline
             y_base = pdf.get_y()
-            
-            # Ajusta altura inline: mínimo de 4mm e máximo de 8.5mm (para frações)
-            h_calc = h_px * px_to_mm
-            h = min(max(h_calc, 4.0), 8.5)
+
+            # Espaçamento de guarda antes da imagem
+            pdf.set_x(pdf.get_x() + 0.8)
+
+            h = min(h_px * px_to_mm, 4.0)
             w = h * (w_px / h_px)
 
-            # Quebra de linha se a imagem estourar a margem direita
+            # Se a imagem extrapolar a margem direita, faz quebra de linha
             if pdf.get_x() + w > pdf.w - pdf.r_margin:
                 pdf.ln(6.5)
                 pdf.set_x(pdf.l_margin)
                 y_base = pdf.get_y()
 
-            # Alinhamento pelo centro da linha de texto (altura base ~6.5mm)
+            # Posiciona verticalmente para alinhar com o centro do texto
             y_img = y_base + (6.5 - h) / 2
             x_img = pdf.get_x()
 
             pdf.image(tmp_path, x=x_img, y=y_img, h=h, w=w)
+
+            # Restaura exatamente a coordenada Y original da linha de texto
             pdf.set_xy(x_img + w + 1.2, y_base)
     finally:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+        os.unlink(tmp_path)
+
 
 # ── TOKENIZADOR ───────────────────────────────────────────────────────────────
 def tokenizar_linha(texto: str) -> list[dict]:
     """
     Divide uma linha em tokens (texto, display $$, inline $).
-    Trata delimitadores brutos e limpa vazamentos de código LaTeX em texto plano.
     """
-    # 1. Normalização de Moeda e Escapes
-    texto_tratado = texto.replace("R\\$", "R$")
-    texto_tratado = re.sub(r'\$?\s*R\$\s*(\d+)', r'R$ \1', texto_tratado)
-    texto_tratado = re.sub(r'(\d+[\d\.,]*)\$', r'\1', texto_tratado)
-
-    TAG_MOEDA = "___MOEDA_REAIS___"
-    texto_seguro = texto_tratado.replace("R$", TAG_MOEDA)
-
-    # 2. Desvincula hífens/marcadores de lista grudados no LaTeX (ex: "-$x$" -> "- $x$")
-    texto_seguro = re.sub(r'(^|\s+)-\s*\$', r'\1- $', texto_seguro)
-
     tokens = []
     i = 0
     buf = ""
-    n = len(texto_seguro)
+    n = len(texto)
 
     while i < n:
+
         # ── Display $$...$$ ──────────────────────────────────────────────────
-        if texto_seguro.startswith("$$", i):
+        if texto.startswith("$$", i):
             if buf:
-                tokens.append({"tipo": "texto", "conteudo": buf.replace(TAG_MOEDA, "R$")})
+                tokens.append({"tipo": "texto", "conteudo": buf})
                 buf = ""
-            j = texto_seguro.find("$$", i + 2)
+            j = texto.find("$$", i + 2)
             if j != -1:
-                tokens.append({"tipo": "display", "conteudo": texto_seguro[i + 2:j].strip()})
+                tokens.append({"tipo": "display", "conteudo": texto[i + 2:j]})
                 i = j + 2
             else:
-                buf += texto_seguro[i]
+                buf += texto[i]
                 i += 1
             continue
 
         # ── Inline $...$ ─────────────────────────────────────────────────────
-        if texto_seguro[i] == "$":
-            # Procura fechamento do cifrão
-            j = texto_seguro.find("$", i + 1)
-            if j != -1 and j > i + 1:
-                # Garante que não é um $$
-                if texto_seguro[j - 1] != "$" and (j + 1 >= n or texto_seguro[j + 1] != "$"):
+        if texto[i] == "$":
+            precedido = i > 0 and (texto[i - 1].isalpha() or texto[i - 1].isdigit())
+            seguido_valido = (i + 1 < n) and texto[i + 1] not in (" ", "\t", "")
+
+            if not precedido and seguido_valido:
+                j = i + 1
+                fechamento = -1
+                while j < n:
+                    if texto[j] == "$":
+                        prec_ok = texto[j - 1] != " "
+                        segu = texto[j + 1] if j + 1 < n else ""
+                        segu_ok = segu == "" or not segu.isalnum()
+                        if prec_ok and segu_ok:
+                            fechamento = j
+                            break
+                    j += 1
+
+                if fechamento != -1:
                     if buf:
-                        tokens.append({"tipo": "texto", "conteudo": buf.replace(TAG_MOEDA, "R$")})
+                        tokens.append({"tipo": "texto", "conteudo": buf})
                         buf = ""
-                    
-                    conteudo_inline = texto_seguro[i + 1:j].strip()
-                    tokens.append({"tipo": "inline", "conteudo": conteudo_inline})
-                    i = j + 1
+                    tokens.append({"tipo": "inline", "conteudo": texto[i + 1:fechamento]})
+                    i = fechamento + 1
                     continue
 
-        buf += texto_seguro[i]
+        buf += texto[i]
         i += 1
 
     if buf:
-        tokens.append({"tipo": "texto", "conteudo": buf.replace(TAG_MOEDA, "R$")})
+        tokens.append({"tipo": "texto", "conteudo": buf})
 
     return tokens
 
@@ -191,10 +189,10 @@ class TextRenderer:
     """Renderiza texto puro tratando **negrito** e *itálico*, removendo marcadores e sanitizando caracteres."""
 
     def __init__(self, pdf: FPDF, font_name: str = "DejaVu", base_size: float = 10):
-        self.pdf       = pdf
+        self.pdf = pdf
         self.font_name = font_name
         self.base_size = base_size
-        self.lh        = 6.5
+        self.lh = 6.5
 
     def _set(self, style: str = ""):
         try:
@@ -205,7 +203,7 @@ class TextRenderer:
     def _encode(self, t: str) -> str:
         # Substitui travessões longos (—) e médios (–) por hífen simples (-)
         t = t.replace("—", "-").replace("–", "-")
-        
+
         if self.pdf.font_family.lower() == "helvetica":
             return t.encode("latin-1", "replace").decode("latin-1")
         return t
@@ -237,6 +235,7 @@ class TextRenderer:
 
         self._set("")
 
+
 # ── RENDERIZAÇÃO DE TOKENS ────────────────────────────────────────────────────
 def _renderizar_tokens(pdf: FPDF, renderer: TextRenderer, texto: str):
     """Processa tokens de uma linha intercalando texto e imagens LaTeX."""
@@ -252,15 +251,16 @@ def _renderizar_tokens(pdf: FPDF, renderer: TextRenderer, texto: str):
             else:
                 renderer.write_span(tok["conteudo"])
 
+
 # ── CLASSE PDF ────────────────────────────────────────────────────────────────
 class PDFMaterial(FPDF):
     def __init__(self, disciplina: str, ano_escolar: str, assunto: str):
         super().__init__()
-        self.disciplina  = disciplina
+        self.disciplina = disciplina
         self.ano_escolar = ano_escolar
-        self.assunto     = assunto
+        self.assunto = assunto
         if FONT_DIR:
-            self.add_font("DejaVu", style="",  fname=os.path.join(FONT_DIR, "DejaVuSans.ttf"))
+            self.add_font("DejaVu", style="", fname=os.path.join(FONT_DIR, "DejaVuSans.ttf"))
             self.add_font("DejaVu", style="B", fname=os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"))
             self.add_font("DejaVu", style="I", fname=os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf"))
 
@@ -392,50 +392,29 @@ def get_gemini_client(api_key: str) -> genai.Client:
 def gerar_conteudo_phc(client, disciplina: str, ano_escolar: str,
                        assunto: str, codigo_bncc: str = "") -> str:
     bncc_str = f"com referência à BNCC: {codigo_bncc}" if codigo_bncc else ""
-    prompt = f""" 
-    Você é um professor especialista em Didática sob o referencial da
-    PEDAGOGIA HISTÓRICO-CRÍTICA e da TEORIA GRAMSCIANA DA HEGEMONIA.
- 
-    Elabore um material de aula completo e profundo para:
-    - Disciplina: {disciplina}
-    - Ano/Série: {ano_escolar}
-    - Conteúdo/Assunto: {assunto}
-    {codigo_bncc}
- 
-    ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
-    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido
-       historicamente pela humanidade para responder a necessidades concretas de sobrevivência,
-       trabalho e organização social.
-    2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA
-       REALIDADE, capacitando os sujeitos (especialmente das classes populares) para o AUTOGOVERNO,
-       a interpretação da sociedade e a tomada de decisão autônoma.
-    3. Rompa com a dualidade do ensino: entregue RIGOR TÉCNICO-CIENTÍFICO unido à CONSCIÊNCIA CRÍTICA.
- 
-    Siga ESTRITAMENTE a estrutura abaixo:
- 
-    # 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO
-    - Apresente a origem social e a necessidade histórica deste conceito.
-    - Aponte a relevância para o mundo contemporâneo (trabalho, economia, política, cidadania).
-    - Definição rigorosa, formal e conceitual, com propriedades e leis.
- 
-    # 2. EXERCÍCIOS DE FIXAÇÃO E DOMÍNIO CONCEITUAL
-    - Questões de aplicação rigorosa dos conceitos e fórmulas.
- 
-    # 3. DESAFIOS DE LEITURA CRÍTICA E CONTRA-HEGEMONIA
-    - Questões contextualizadas em dados reais ou plausíveis da sociedade.
-    - Exija interpretação, argumentação e decisão crítica com base no conhecimento.
- 
-    # 4. GABARITO COMENTADO E PEDAGÓGICO
-    - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
+    prompt = f"""Você é um professor de {disciplina} do {ano_escolar} seguindo a Pedagogia Histórico-Crítica (PHC).
 
+Gere um plano de aula completo sobre "{assunto}" {bncc_str}.
+
+Estrutura obrigatória (use exatamente estes cabeçalhos):
+# 1. Prática Social
+# 2. Fixação
+# 3. Leitura Crítica
+# 4. Gabarito
 
 REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
-- NUNCA escreva comandos LaTeX soltos no texto sem delimitadores. Tudo que for comando LaTeX (\Delta, \neq, \mathbb, \notin) DEVE estar OBRIGATORIAMENTE dentro de $...$ ou $$...$$.
-- NUNCA use o hífen ou marcador de lista colado na expressão LaTeX (Exemplo ERRADO: "-$x$". Exemplo CORRETO: "- $x$").
-- NUNCA use bloco de código (```).
-- Use LaTeX inline ($...$) apenas para variáveis isoladas, letras ou igualdades simples (ex: $x$, $a \neq 0$, $\Delta$).
-- Qualquer expressão com fração (\frac), raiz (\sqrt) ou passos de cálculo longos DEVE ser formatada em bloco (display): $$expressão$$.
-- NUNCA use o símbolo de cifrão $ para dinheiro. Escreva sempre como texto simples: R$ 16,00 ou R$ 8.450,00.
+- NUNCA use blocos de código (triplas crases ```) para formatar texto, exemplos ou matemática.
+- NUNCA escreva notação matemática solta no texto como 3^0, 3^1, x^2. Use SEMPRE a notação LaTeX embutida: $3^0$, $3^1$, $x^2$.
+- Para exibições em listas ou passos organizados, use listas comuns do Markdown (com traço "-") e insira as variáveis/expressões em LaTeX. Exemplo:
+  - Instante $t = 0$: 1 pessoa original ($3^0$)
+  - Instante $t = 1$: 3 novas pessoas ($3^1$)
+- Use LaTeX ($...$) para QUALQUER variável, expressão, fórmula, igualdade ou notação de potência/radiciação no texto (ex: $t = 0$, $x$, $A = l^2$).
+- Expressões matemáticas em destaque (fórmulas, equações em bloco próprio): $$expressão$$ — exemplo: $$M = C \\cdot (1+i)^t$$
+- Use notação LaTeX padrão: \\frac{{num}}{{den}}, \\sqrt{{x}}, \\sqrt[3]{{x}}, x^{{2}}, \\cdot, \\pm, \\leq, \\geq
+- NUNCA coloque números isolados ou texto simples dentro de $ (escreva "3 voltas", "4 lados" normalmente como texto).
+- NÃO use $ para indicar moeda (escreva "reais", "R$" com espaço após o símbolo, ou "BRL").
+- Negrito para termos importantes: **termo**.
+- Texto corrido em português fora dos delimitadores matemáticos.
 """
     config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
     response = client.models.generate_content(
