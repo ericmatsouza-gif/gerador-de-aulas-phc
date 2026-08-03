@@ -1,9 +1,8 @@
-#FUNCIONA
+import io
 import os
 import re
-import io
-import requests
 import tempfile
+import requests
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -13,7 +12,8 @@ from fpdf import FPDF, XPos, YPos
 # ── CONFIGURAÇÃO DA PÁGINA ────────────────────────────────────────────────────
 st.set_page_config(page_title="Gerador de Aulas", page_icon="📚", layout="centered")
 
-st.markdown("""
+st.markdown(
+    """
 <style>
 .stButton>button {
     width: 100%; background-color: #2980b9; color: white;
@@ -32,23 +32,52 @@ st.markdown("""
     text-align: center; font-size: 0.85rem; color: #7f8c8d;
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
-# ── LOCALIZAÇÃO DE FONTES DejaVu ──────────────────────────────────────────────
-def _localizar_fontes_dejavu() -> str:
-    paths = [
+# ── GERENCIADOR DE FONTES DEJAVU (GARANTE UNICODE) ─────────────────────────────
+@st.cache_resource
+def garantir_fontes_dejavu() -> str:
+    """Procura ou baixa as fontes DejaVu locais para garantir suporte total a Unicode."""
+    pasta_fontes = os.path.join(tempfile.gettempdir(), "dejavu_fonts")
+    os.makedirs(pasta_fontes, exist_ok=True)
+
+    fontes = {
+        "DejaVuSans.ttf": "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/ttf/DejaVuSans.ttf",
+        "DejaVuSans-Bold.ttf": "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/ttf/DejaVuSans-Bold.ttf",
+        "DejaVuSans-Oblique.ttf": "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/ttf/DejaVuSans-Oblique.ttf",
+    }
+
+    # Verifica se já estão no sistema
+    paths_sistema = [
         "/usr/share/fonts/truetype/dejavu/",
         "/usr/share/fonts/dejavu/",
         "/usr/local/share/fonts/",
     ]
-    for p in paths:
-        if os.path.isfile(os.path.join(p, "DejaVuSans.ttf")):
+    for p in paths_sistema:
+        if all(
+            os.path.isfile(os.path.join(p, nome)) for nome in fontes.keys()
+        ):
             return p
-    return ""
+
+    # Se não estiverem no sistema, baixa dinamicamente
+    for nome, url in fontes.items():
+        caminho_local = os.path.join(pasta_fontes, nome)
+        if not os.path.isfile(caminho_local):
+            try:
+                r = requests.get(url, timeout=10)
+                if r.status_code == 200:
+                    with open(caminho_local, "wb") as f:
+                        f.write(r.content)
+            except Exception:
+                pass
+
+    return pasta_fontes
 
 
-FONT_DIR = _localizar_fontes_dejavu()
+FONT_DIR = garantir_fontes_dejavu()
 
 # ── CODECOGS: LaTeX → PNG ─────────────────────────────────────────────────────
 CODECOGS_URL = "https://latex.codecogs.com/png.image?"
@@ -67,57 +96,47 @@ def latex_para_png(expr: str, dpi: int = 110) -> bytes | None:
 
 
 def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
-    """
-    Insere PNG LaTeX preservando a linha de base ou forçando quebra em fórmulas de bloco (display).
-    """
+    """Insere PNG LaTeX preservando a linha de base ou em linha separada para bloco."""
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp.write(png_bytes)
         tmp_path = tmp.name
 
     try:
         from PIL import Image as PILImage
+
         with PILImage.open(io.BytesIO(png_bytes)) as img:
             w_px, h_px = img.size
 
-        px_to_mm = 0.22  # Conversão para DPI 110
+        px_to_mm = 0.22  # Conversão aproximada para DPI 110
 
         if is_display:
             h = min(h_px * px_to_mm, 12.0)
             w = h * (w_px / h_px)
 
-            # Força a quebra de linha e vai para a margem esquerda antes do bloco
             pdf.ln(6.5)
             pdf.set_x(pdf.l_margin)
 
             x_centro = pdf.l_margin + (pdf.epw - w) / 2
             pdf.image(tmp_path, x=x_centro, y=pdf.get_y(), h=h, w=w)
 
-            # Avança a altura da imagem + espaçamento e reseta o X
             pdf.set_y(pdf.get_y() + h + 3)
             pdf.set_x(pdf.l_margin)
         else:
-            # Salva o Y original da linha antes de inserir a imagem inline
             y_base = pdf.get_y()
-
-            # Espaçamento de guarda antes da imagem
             pdf.set_x(pdf.get_x() + 0.8)
 
             h = min(h_px * px_to_mm, 4.0)
             w = h * (w_px / h_px)
 
-            # Se a imagem extrapolar a margem direita, faz quebra de linha
             if pdf.get_x() + w > pdf.w - pdf.r_margin:
                 pdf.ln(6.5)
                 pdf.set_x(pdf.l_margin)
                 y_base = pdf.get_y()
 
-            # Posiciona verticalmente para alinhar com o centro do texto
             y_img = y_base + (6.5 - h) / 2
             x_img = pdf.get_x()
 
             pdf.image(tmp_path, x=x_img, y=y_img, h=h, w=w)
-
-            # Restaura exatamente a coordenada Y original da linha de texto
             pdf.set_xy(x_img + w + 1.2, y_base)
     finally:
         os.unlink(tmp_path)
@@ -125,31 +144,22 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
 
 # ── TOKENIZADOR ───────────────────────────────────────────────────────────────
 def tokenizar_linha(texto: str) -> list[dict]:
-    """
-    Divide uma linha em tokens (texto, display $$, inline $).
-    """
+    """Divide uma linha em tokens (texto, display $$, inline $)."""
     tokens = []
     i = 0
     buf = ""
     n = len(texto)
 
     while i < n:
-
-        # ── Display $$...$$ ──────────────────────────────────────────────────
-        if texto.startswith("$$", i):
-            if buf:
-                tokens.append({"tipo": "texto", "conteudo": buf})
-                buf = ""
-            j = texto.find("$$", i + 2)
+        if texto.startswith("$$", i):             if buf:                 tokens.append({"tipo": "texto", "conteudo": buf})                 buf = ""             j = texto.find("$$", i + 2)
             if j != -1:
-                tokens.append({"tipo": "display", "conteudo": texto[i + 2:j]})
+                tokens.append({"tipo": "display", "conteudo": texto[i + 2 : j]})
                 i = j + 2
             else:
                 buf += texto[i]
                 i += 1
             continue
 
-        # ── Inline $...$ ─────────────────────────────────────────────────────
         if texto[i] == "$":
             precedido = i > 0 and (texto[i - 1].isalpha() or texto[i - 1].isdigit())
             seguido_valido = (i + 1 < n) and texto[i + 1] not in (" ", "\t", "")
@@ -171,7 +181,9 @@ def tokenizar_linha(texto: str) -> list[dict]:
                     if buf:
                         tokens.append({"tipo": "texto", "conteudo": buf})
                         buf = ""
-                    tokens.append({"tipo": "inline", "conteudo": texto[i + 1:fechamento]})
+                    tokens.append(
+                        {"tipo": "inline", "conteudo": texto[i + 1 : fechamento]}
+                    )
                     i = fechamento + 1
                     continue
 
@@ -186,13 +198,13 @@ def tokenizar_linha(texto: str) -> list[dict]:
 
 # ── RENDERER DE TEXTO ─────────────────────────────────────────────────────────
 class TextRenderer:
-    """Renderiza texto puro tratando **negrito** e *itálico*, removendo marcadores e sanitizando caracteres."""
+    """Renderiza texto tratando negrito, itálico e sanitizando caracteres incompatíveis."""
 
     def __init__(self, pdf: FPDF, font_name: str = "DejaVu", base_size: float = 10):
-        self.pdf       = pdf
+        self.pdf = pdf
         self.font_name = font_name
         self.base_size = base_size
-        self.lh        = 6.5
+        self.lh = 6.5
 
     def _set(self, style: str = ""):
         try:
@@ -201,15 +213,15 @@ class TextRenderer:
             self.pdf.set_font("helvetica", style, self.base_size)
 
     def _encode(self, t: str) -> str:
-        # Substitui travessões longos (—) e médios (–) por hífen simples (-)
+        # Substitui travessões por hífens por segurança adicional
         t = t.replace("—", "-").replace("–", "-")
-        
+
         if self.pdf.font_family.lower() == "helvetica":
             return t.encode("latin-1", "replace").decode("latin-1")
         return t
 
     def write_span(self, text: str):
-        partes = re.split(r'(\*\*|\*)', text)
+        partes = re.split(r"(\*\*|\*)", text)
         bold = False
         italic = False
 
@@ -225,8 +237,10 @@ class TextRenderer:
                 continue
 
             style = ""
-            if bold: style += "B"
-            if italic: style += "I"
+            if bold:
+                style += "B"
+            if italic:
+                style += "I"
 
             self._set(style)
             limpo = p.replace("*", "")
@@ -235,9 +249,9 @@ class TextRenderer:
 
         self._set("")
 
+
 # ── RENDERIZAÇÃO DE TOKENS ────────────────────────────────────────────────────
 def _renderizar_tokens(pdf: FPDF, renderer: TextRenderer, texto: str):
-    """Processa tokens de uma linha intercalando texto e imagens LaTeX."""
     tokens = tokenizar_linha(texto)
     for tok in tokens:
         if tok["tipo"] == "texto":
@@ -253,27 +267,55 @@ def _renderizar_tokens(pdf: FPDF, renderer: TextRenderer, texto: str):
 
 # ── CLASSE PDF ────────────────────────────────────────────────────────────────
 class PDFMaterial(FPDF):
+
     def __init__(self, disciplina: str, ano_escolar: str, assunto: str):
         super().__init__()
         self.disciplina = disciplina
         self.ano_escolar = ano_escolar
         self.assunto = assunto
+
         if FONT_DIR:
-            self.add_font("DejaVu", style="", fname=os.path.join(FONT_DIR, "DejaVuSans.ttf"))
-            self.add_font("DejaVu", style="B", fname=os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"))
-            self.add_font("DejaVu", style="I", fname=os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf"))
+            self.add_font(
+                "DejaVu", style="", fname=os.path.join(FONT_DIR, "DejaVuSans.ttf")
+            )
+            self.add_font(
+                "DejaVu",
+                style="B",
+                fname=os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"),
+            )
+            self.add_font(
+                "DejaVu",
+                style="I",
+                fname=os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf"),
+            )
+
+    def _sanitizar(self, texto: str) -> str:
+        """Sanitiza strings do cabeçalho e rodapé quando usando helvetica."""
+        if not FONT_DIR or self.font_family.lower() == "helvetica":
+            return texto.replace("—", "-").replace("–", "-")
+        return texto
 
     def header(self):
         fonte = "DejaVu" if FONT_DIR else "helvetica"
         self.set_font(fonte, "B", 12)
         self.set_text_color(26, 42, 58)
-        self.cell(0, 10, "PLANO DE AULA E MATERIAL DIDÁTICO",
-                  align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.cell(
+            0,
+            10,
+            "PLANO DE AULA E MATERIAL DIDÁTICO",
+            align="C",
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
+        )
         self.set_font(fonte, "B", 9)
         self.set_text_color(41, 128, 185)
-        self.cell(0, 5,
-                  f"{self.disciplina.upper()} | {self.ano_escolar} | Assunto: {self.assunto}",
-                  align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+        subtitulo = self._sanitizar(
+            f"{self.disciplina.upper()} | {self.ano_escolar} | Assunto: {self.assunto}"
+        )
+        self.cell(
+            0, 5, subtitulo, align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT
+        )
         self.ln(2)
         self.set_draw_color(41, 128, 185)
         self.set_line_width(0.5)
@@ -289,8 +331,9 @@ class PDFMaterial(FPDF):
 
 
 # ── COMPILADOR PDF ────────────────────────────────────────────────────────────
-def compilar_pdf(texto_md: str, disciplina: str,
-                 ano_escolar: str, assunto: str) -> bytes:
+def compilar_pdf(
+    texto_md: str, disciplina: str, ano_escolar: str, assunto: str
+) -> bytes:
     pdf = PDFMaterial(disciplina, ano_escolar, assunto)
     pdf.alias_nb_pages()
     pdf.set_margins(15, 20, 15)
@@ -321,8 +364,8 @@ def compilar_pdf(texto_md: str, disciplina: str,
             pdf.set_fill_color(41, 128, 185)
             set_fonte(bold=True, size=11)
             pdf.set_text_color(255, 255, 255)
-            pdf.cell(W, 8, f"  {s[2:]}", fill=True,
-                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            texto_h1 = pdf._sanitizar(f"  {s[2:]}")
+            pdf.cell(W, 8, texto_h1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_text_color(44, 62, 80)
             pdf.ln(3)
             continue
@@ -332,15 +375,16 @@ def compilar_pdf(texto_md: str, disciplina: str,
             pdf.ln(3)
             set_fonte(bold=True, size=10.5)
             pdf.set_text_color(26, 42, 58)
-            pdf.cell(W, 7, s[3:], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            texto_h2 = pdf._sanitizar(s[3:])
+            pdf.cell(W, 7, texto_h2, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_draw_color(41, 128, 185)
             pdf.line(15, pdf.get_y(), 195, pdf.get_y())
             pdf.ln(2)
             continue
 
         # H3/H4
-        if re.match(r'^#{3,4}\s+', s):
-            conteudo = re.sub(r'^#{3,4}\s+', '', s)
+        if re.match(r"^#{3,4}\s+", s):
+            conteudo = pdf._sanitizar(re.sub(r"^#{3,4}\s+", "", s))
             pdf.ln(2)
             set_fonte(bold=True, size=10)
             pdf.set_text_color(44, 62, 80)
@@ -349,7 +393,7 @@ def compilar_pdf(texto_md: str, disciplina: str,
             continue
 
         # Separador ---
-        if re.match(r'^-{3,}$', s):
+        if re.match(r"^-{3,}$", s):
             pdf.ln(2)
             pdf.set_draw_color(200, 200, 200)
             pdf.line(15, pdf.get_y(), 195, pdf.get_y())
@@ -357,11 +401,11 @@ def compilar_pdf(texto_md: str, disciplina: str,
             continue
 
         # Lista: -, *, •, 1., a)
-        match_list = re.match(r'^(\s*)([-•]|\d+\.|\w\))\s+', linha)
+        match_list = re.match(r"^(\s*)([-•]|\d+\.|\w\))\s+", linha)
         if match_list:
             bullet = match_list.group(2)
             indent = len(match_list.group(1)) * 2 + 5
-            conteudo = linha[len(match_list.group(0)):]
+            conteudo = linha[len(match_list.group(0)) :]
             pdf.set_x(pdf.l_margin + indent - 3)
             set_fonte(bold=False, size=10)
             pdf.set_text_color(44, 62, 80)
@@ -386,8 +430,9 @@ def get_gemini_client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
-def gerar_conteudo_phc(client, disciplina: str, ano_escolar: str,
-                       assunto: str, codigo_bncc: str = "") -> str:
+def gerar_conteudo_phc(
+    client, disciplina: str, ano_escolar: str, assunto: str, codigo_bncc: str = ""
+) -> str:
     bncc_str = f"com referência à BNCC: {codigo_bncc}" if codigo_bncc else ""
     prompt = f"""Você é um professor de {disciplina} do {ano_escolar} seguindo a Pedagogia Histórico-Crítica (PHC).
 
@@ -413,7 +458,9 @@ REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
 - Negrito para termos importantes: **termo**.
 - Texto corrido em português fora dos delimitadores matemáticos.
 """
-    config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
+    config = types.GenerateContentConfig(
+        max_output_tokens=8192, temperature=0.7
+    )
     response = client.models.generate_content(
         model="gemini-flash-latest", contents=prompt, config=config
     )
@@ -422,7 +469,7 @@ REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
 
 # ── INTERFACE ─────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.image("https://img.icons8.com/color/96/teacher.png", width=70)
+    st.image("[https://img.icons8.com/color/96/teacher.png](https://img.icons8.com/color/96/teacher.png)", width=70)
     st.title("Sobre o Autor")
     st.markdown("**Prof. Me. Eric Souza da Silva**")
     st.caption("Licenciado em Matemática (UERJ), Mestre pelo PROFMAT/UERJ.")
@@ -432,7 +479,7 @@ st.markdown(
     '<div class="author-card">'
     '<div class="author-name">Prof. Me. Eric Souza da Silva</div>'
     '<div class="author-desc">Perspectiva PHC e Hegemonia Gramsciana.</div>'
-    '</div>',
+    "</div>",
     unsafe_allow_html=True,
 )
 
@@ -469,7 +516,9 @@ if st.button("✨ Gerar Material Didático"):
             st.success("✅ Material gerado com sucesso!")
         except APIError as e:
             if "503" in str(e) or "unavailable" in str(e).lower():
-                st.error("⚠️ Servidor ocupado. Tente novamente em alguns segundos.")
+                st.error(
+                    "⚠️ Servidor ocupado. Tente novamente em alguns segundos."
+                )
             else:
                 st.error(f"❌ Erro na API Gemini: {e}")
         except Exception as e:
@@ -482,7 +531,9 @@ if st.session_state.conteudo_md:
     st.divider()
 
     if st.button("🖨️ Gerar PDF"):
-        with st.spinner("⚙️ Renderizando expressões matemáticas via Codecogs..."):
+        with st.spinner(
+            "⚙️ Renderizando expressões matemáticas via Codecogs..."
+        ):
             try:
                 pdf_bytes = compilar_pdf(
                     st.session_state.conteudo_md,
