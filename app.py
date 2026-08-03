@@ -401,13 +401,17 @@ Estrutura obrigatória (use exatamente estes cabeçalhos):
 # 3. Leitura Crítica
 # 4. Gabarito
 
-REGRAS DE FORMATAÇÃO — siga rigorosamente:
-- Use LaTeX ($...$) APENAS para variáveis, expressões, fórmulas e símbolos matemáticos (ex: $x$, $A = l^2$).
+REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
+- NUNCA use blocos de código (triplas crases ```) para formatar texto, exemplos ou matemática.
+- NUNCA escreva notação matemática solta no texto como 3^0, 3^1, x^2. Use SEMPRE a notação LaTeX embutida: $3^0$, $3^1$, $x^2$.
+- Para exibições em listas ou passos organizados, use listas comuns do Markdown (com traço "-") e insira as variáveis/expressões em LaTeX. Exemplo:
+  - Instante $t = 0$: 1 pessoa original ($3^0$)
+  - Instante $t = 1$: 3 novas pessoas ($3^1$)
+- Use LaTeX ($...$) para QUALQUER variável, expressão, fórmula, igualdade ou notação de potência/radiciação no texto (ex: $t = 0$, $x$, $A = l^2$).
+- Expressões matemáticas em destaque (fórmulas, equações em bloco próprio): $$expressão$$ — exemplo: $$M = C \\cdot (1+i)^t$$
+- Use notação LaTeX padrão: \\frac{{num}}{{den}}, \\sqrt{{x}}, \\sqrt[3]{{x}}, x^{{2}}, \\cdot, \\pm, \\leq, \\geq
 - NUNCA coloque números isolados ou texto simples dentro de $ (escreva "3 voltas", "4 lados" normalmente como texto).
-- Expressões matemáticas em destaque (fórmulas, equações em bloco): $$expressão$$ — exemplo: $$M = C \\cdot (1+i)^t$$
-- Use LaTeX padrão: \\frac{{num}}{{den}}, \\sqrt{{x}}, \\sqrt[3]{{x}}, x^{{2}}, \\cdot, \\pm, \\leq, \\geq
 - NÃO use $ para indicar moeda (escreva "reais", "R$" com espaço após o símbolo, ou "BRL").
-- NÃO use blocos ```math``` ou \\[ \\].
 - Negrito para termos importantes: **termo**.
 - Texto corrido em português fora dos delimitadores matemáticos.
 """
