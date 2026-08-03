@@ -38,54 +38,46 @@ class PHCRenderer:
         except:
             self.pdf.set_font("helvetica", style, size)
 
-    def _write(self, text, y_offset=0):
-        if not text: return
-        self._apply_style()
-        if self.pdf.font_family.lower() == "helvetica":
-            text = text.encode("latin-1", "replace").decode("latin-1")
-        
-        x_current, y_current = self.pdf.get_x(), self.pdf.get_y()
+    def _write_at(self, x, y, text):
+    """Escreve texto em coordenada absoluta, retorna o X final."""
+    if not text: return x
+    self._apply_style()
+    if self.pdf.font_family.lower() == "helvetica":
+        text = text.encode('latin-1', 'replace').decode('latin-1')
+    self.pdf.set_xy(x, y)
+    self.pdf.write(self.line_height, text)
+    return self.pdf.get_x()
 
-        if y_offset != 0:
-            self.pdf.set_y(y_current + y_offset)
-
-        self.pdf.write(self.line_height, text)
-
-        if y_offset != 0:
-            # Apenas ajusta o Y de volta, o X já foi avançado pelo write
-            self.pdf.set_y(y_current) 
-
-    def draw_fraction(self, num, den):
-        if self.in_exponent:
-            self._write(f"({num}/{den})")
-            return
-        
-        x_start, y_start = self.pdf.get_x(), self.pdf.get_y()
-        old_mult = self.size_mult
-        self.size_mult *= 0.8
-        self._apply_style()
-        
-        w_num = self.pdf.get_string_width(num)
-        w_den = self.pdf.get_string_width(den)
-        w_frac = max(w_num, w_den) + 2
-        
-        # Renderiza Numerador
-        self.pdf.set_xy(x_start + (w_frac - w_num)/2, y_start - self.line_height * 0.6)
-        self.pdf.write(self.line_height, num)
-        
-        # Renderiza Denominador
-        self.pdf.set_xy(x_start + (w_frac - w_den)/2, y_start + self.line_height * 0.6)
-        self.pdf.write(self.line_height, den)
-        
-        # Desenha a linha da fração
-        self.pdf.set_draw_color(44, 62, 80)
-        self.pdf.set_line_width(0.2)
-        self.pdf.line(x_start, y_start + self.line_height/2, x_start + w_frac, y_start + self.line_height/2)
-        
-        # Reposiciona o cursor após a fração
-        self.pdf.set_xy(x_start + w_frac + 1, y_start)
-        self.size_mult = old_mult
-        self._apply_style()
+def draw_fraction(self, num_text, den_text):
+    if self.in_exponent:
+        self.x = self._write_at(self.x, self.y, f"({num_text}/{den_text})")
+        return
+    
+    old_mult = self.size_mult
+    self.size_mult *= 0.85
+    self._apply_style()
+    
+    w_num = self.pdf.get_string_width(num_text)
+    w_den = self.pdf.get_string_width(den_text)
+    w_frac = max(w_num, w_den) + 4
+    half = self.line_height * 0.55
+    
+    # Numerador acima da linha base
+    self._write_at(self.x + (w_frac - w_num) / 2, self.y - half, num_text)
+    
+    # Linha separadora exatamente na linha base
+    self.pdf.set_draw_color(44, 62, 80)
+    self.pdf.set_line_width(0.2)
+    self.pdf.line(self.x, self.y + self.line_height / 2,
+                  self.x + w_frac, self.y + self.line_height / 2)
+    
+    # Denominador abaixo da linha base
+    self._write_at(self.x + (w_frac - w_den) / 2, self.y + half, den_text)
+    
+    # Avança o cursor X
+    self.x += w_frac + 1
+    self.size_mult = old_mult
+    self._apply_style()
 
     def render_span(self, text):
         i = 0
