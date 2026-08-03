@@ -1,3 +1,4 @@
+#FUNCIONA
 import os
 import re
 import io
@@ -46,11 +47,12 @@ def _localizar_fontes_dejavu() -> str:
             return p
     return ""
 
+
 FONT_DIR = _localizar_fontes_dejavu()
 
-
 # ── CODECOGS: LaTeX → PNG ─────────────────────────────────────────────────────
-CODECOGS_URL = "[https://latex.codecogs.com/png.image](https://latex.codecogs.com/png.image)?"
+CODECOGS_URL = "https://latex.codecogs.com/png.image?"
+
 
 def latex_para_png(expr: str, dpi: int = 110) -> bytes | None:
     """Baixa PNG da expressão LaTeX via Codecogs com DPI ajustado para fonte 10pt."""
@@ -66,7 +68,7 @@ def latex_para_png(expr: str, dpi: int = 110) -> bytes | None:
 
 def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
     """
-    Insere PNG LaTeX preservando proporção de fonte constante mesmo para frações/expressões altas.
+    Insere PNG LaTeX preservando a linha de base ou forçando quebra em fórmulas de bloco (display).
     """
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp.write(png_bytes)
@@ -80,43 +82,42 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
         px_to_mm = 0.22  # Conversão para DPI 110
 
         if is_display:
-            # Em bloco (display), permite altura até 12mm
             h = min(h_px * px_to_mm, 12.0)
             w = h * (w_px / h_px)
-            
+
+            # Força a quebra de linha e vai para a margem esquerda antes do bloco
             pdf.ln(6.5)
             pdf.set_x(pdf.l_margin)
-            
+
             x_centro = pdf.l_margin + (pdf.epw - w) / 2
             pdf.image(tmp_path, x=x_centro, y=pdf.get_y(), h=h, w=w)
-            
+
+            # Avança a altura da imagem + espaçamento e reseta o X
             pdf.set_y(pdf.get_y() + h + 3)
             pdf.set_x(pdf.l_margin)
         else:
-            # Em linha (inline): calcula largura natural para manter o tamanho do texto/fonte uniforme
-            w_calculado = w_px * px_to_mm
-            h_calculado = h_px * px_to_mm
-
-            # Se a imagem for muito alta (ex: frações), permite até 6.5mm em vez de travar em 4.0mm
-            h = min(h_calculado, 6.5)
-            w = w_calculado * (h / h_calculado)
-
+            # Salva o Y original da linha antes de inserir a imagem inline
             y_base = pdf.get_y()
+
+            # Espaçamento de guarda antes da imagem
             pdf.set_x(pdf.get_x() + 0.8)
 
-            # Quebra de linha se extrapolar a margem
+            h = min(h_px * px_to_mm, 4.0)
+            w = h * (w_px / h_px)
+
+            # Se a imagem extrapolar a margem direita, faz quebra de linha
             if pdf.get_x() + w > pdf.w - pdf.r_margin:
                 pdf.ln(6.5)
                 pdf.set_x(pdf.l_margin)
                 y_base = pdf.get_y()
 
-            # Alinha pelo centro vertical da linha de texto
+            # Posiciona verticalmente para alinhar com o centro do texto
             y_img = y_base + (6.5 - h) / 2
             x_img = pdf.get_x()
 
             pdf.image(tmp_path, x=x_img, y=y_img, h=h, w=w)
 
-            # Restaura Y exato e move X para após a imagem
+            # Restaura exatamente a coordenada Y original da linha de texto
             pdf.set_xy(x_img + w + 1.2, y_base)
     finally:
         os.unlink(tmp_path)
@@ -182,15 +183,16 @@ def tokenizar_linha(texto: str) -> list[dict]:
 
     return tokens
 
+
 # ── RENDERER DE TEXTO ─────────────────────────────────────────────────────────
 class TextRenderer:
-    """Renderiza texto puro tratando **negrito** e *itálico*, removendo marcadores e sanitizando caracteres."""
+    """Renderiza texto puro tratando **negrito** e *itálico*, removendo marcadores vazados."""
 
     def __init__(self, pdf: FPDF, font_name: str = "DejaVu", base_size: float = 10):
-        self.pdf       = pdf
+        self.pdf = pdf
         self.font_name = font_name
         self.base_size = base_size
-        self.lh        = 6.5
+        self.lh = 6.5
 
     def _set(self, style: str = ""):
         try:
@@ -199,9 +201,6 @@ class TextRenderer:
             self.pdf.set_font("helvetica", style, self.base_size)
 
     def _encode(self, t: str) -> str:
-        # Substitui travessões longos (—) e médios (–) por hífen simples (-)
-        t = t.replace("—", "-").replace("–", "-")
-
         if self.pdf.font_family.lower() == "helvetica":
             return t.encode("latin-1", "replace").decode("latin-1")
         return t
@@ -210,6 +209,7 @@ class TextRenderer:
         """
         Segmenta a string para aplicar formatação e garante a remoção de asteriscos.
         """
+        # Suporta tanto **negrito** quanto *itálico*
         partes = re.split(r'(\*\*|\*)', text)
         bold = False
         italic = False
@@ -225,16 +225,18 @@ class TextRenderer:
             if not p:
                 continue
 
+            # Define estilo combinado (B, I ou BI)
             style = ""
             if bold: style += "B"
             if italic: style += "I"
 
             self._set(style)
+            # Remove qualquer asterisco acidental residual do fragmento
             limpo = p.replace("*", "")
             if limpo:
                 self.pdf.write(self.lh, self._encode(limpo))
 
-        self._set("")
+        self._set("")  # Reseta para estilo normal
 
 
 # ── RENDERIZAÇÃO DE TOKENS ────────────────────────────────────────────────────
@@ -257,32 +259,30 @@ def _renderizar_tokens(pdf: FPDF, renderer: TextRenderer, texto: str):
 class PDFMaterial(FPDF):
     def __init__(self, disciplina: str, ano_escolar: str, assunto: str):
         super().__init__()
-        self.disciplina  = disciplina
+        self.disciplina = disciplina
         self.ano_escolar = ano_escolar
-        self.assunto     = assunto
+        self.assunto = assunto
         if FONT_DIR:
-            self.add_font("DejaVu", style="",  fname=os.path.join(FONT_DIR, "DejaVuSans.ttf"))
+            self.add_font("DejaVu", style="", fname=os.path.join(FONT_DIR, "DejaVuSans.ttf"))
             self.add_font("DejaVu", style="B", fname=os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"))
             self.add_font("DejaVu", style="I", fname=os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf"))
 
     def header(self):
-        # Renderiza o cabeçalho APENAS se estiver na página 1
-        if self.page_no() == 1:
-            fonte = "DejaVu" if FONT_DIR else "helvetica"
-            self.set_font(fonte, "B", 12)
-            self.set_text_color(26, 42, 58)
-            self.cell(0, 10, "PLANO DE AULA E MATERIAL DIDÁTICO",
-                      align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            self.set_font(fonte, "B", 9)
-            self.set_text_color(41, 128, 185)
-            self.cell(0, 5,
-                      f"{self.disciplina.upper()} | {self.ano_escolar} | Assunto: {self.assunto}",
-                      align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            self.ln(2)
-            self.set_draw_color(41, 128, 185)
-            self.set_line_width(0.5)
-            self.line(15, self.get_y(), 195, self.get_y())
-            self.ln(5)
+        fonte = "DejaVu" if FONT_DIR else "helvetica"
+        self.set_font(fonte, "B", 12)
+        self.set_text_color(26, 42, 58)
+        self.cell(0, 10, "PLANO DE AULA E MATERIAL DIDÁTICO",
+                  align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.set_font(fonte, "B", 9)
+        self.set_text_color(41, 128, 185)
+        self.cell(0, 5,
+                  f"{self.disciplina.upper()} | {self.ano_escolar} | Assunto: {self.assunto}",
+                  align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.ln(2)
+        self.set_draw_color(41, 128, 185)
+        self.set_line_width(0.5)
+        self.line(15, self.get_y(), 195, self.get_y())
+        self.ln(5)
 
     def footer(self):
         self.set_y(-15)
@@ -301,9 +301,9 @@ def compilar_pdf(texto_md: str, disciplina: str,
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
 
-    fonte    = "DejaVu" if FONT_DIR else "helvetica"
+    fonte = "DejaVu" if FONT_DIR else "helvetica"
     renderer = TextRenderer(pdf, font_name=fonte, base_size=10)
-    W        = pdf.epw
+    W = pdf.epw
 
     def set_fonte(bold=False, size=10):
         try:
@@ -313,7 +313,7 @@ def compilar_pdf(texto_md: str, disciplina: str,
 
     for linha_raw in texto_md.split("\n"):
         linha = linha_raw.rstrip()
-        s     = linha.strip()
+        s = linha.strip()
 
         if not s:
             pdf.ln(3)
@@ -363,8 +363,8 @@ def compilar_pdf(texto_md: str, disciplina: str,
         # Lista: -, *, •, 1., a)
         match_list = re.match(r'^(\s*)([-•]|\d+\.|\w\))\s+', linha)
         if match_list:
-            bullet   = match_list.group(2)
-            indent   = len(match_list.group(1)) * 2 + 5
+            bullet = match_list.group(2)
+            indent = len(match_list.group(1)) * 2 + 5
             conteudo = linha[len(match_list.group(0)):]
             pdf.set_x(pdf.l_margin + indent - 3)
             set_fonte(bold=False, size=10)
@@ -391,7 +391,7 @@ def get_gemini_client(api_key: str) -> genai.Client:
 
 
 def gerar_conteudo_phc(client, disciplina: str, ano_escolar: str,
-                        assunto: str, codigo_bncc: str = "") -> str:
+                       assunto: str, codigo_bncc: str = "") -> str:
     bncc_str = f"com referência à BNCC: {codigo_bncc}" if codigo_bncc else ""
     prompt = f"""Você é um professor de {disciplina} do {ano_escolar} seguindo a Pedagogia Histórico-Crítica (PHC).
 
@@ -405,7 +405,6 @@ Estrutura obrigatória (use exatamente estes cabeçalhos):
 
 REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
 - NUNCA use blocos de código (triplas crases ```) para formatar texto, exemplos ou matemática.
-- NUNCA use travessões (— ou –). Use sempre hífen simples (-).
 - NUNCA escreva notação matemática solta no texto como 3^0, 3^1, x^2. Use SEMPRE a notação LaTeX embutida: $3^0$, $3^1$, $x^2$.
 - Para exibições em listas ou passos organizados, use listas comuns do Markdown (com traço "-") e insira as variáveis/expressões em LaTeX. Exemplo:
   - Instante $t = 0$: 1 pessoa original ($3^0$)
@@ -418,7 +417,7 @@ REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
 - Negrito para termos importantes: **termo**.
 - Texto corrido em português fora dos delimitadores matemáticos.
 """
-    config   = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
+    config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
     response = client.models.generate_content(
         model="gemini-flash-latest", contents=prompt, config=config
     )
@@ -447,11 +446,11 @@ if not api_key:
 
 col_disc, col_ano = st.columns(2)
 with col_disc:
-    disciplina  = st.text_input("Disciplina", placeholder="Ex: Matemática")
+    disciplina = st.text_input("Disciplina", placeholder="Ex: Matemática")
 with col_ano:
     ano_escolar = st.text_input("Ano / Série", placeholder="Ex: 9º ano")
 
-assunto     = st.text_input("Assunto", placeholder="Ex: Potenciação")
+assunto = st.text_input("Assunto", placeholder="Ex: Potenciação")
 codigo_bncc = st.text_input("🎯 BNCC (opcional)")
 
 for chave in ("conteudo_md", "ultima_disciplina", "ultimo_ano", "ultimo_assunto"):
@@ -465,12 +464,12 @@ if st.button("✨ Gerar Material Didático"):
         try:
             with st.spinner("🧠 Elaborando material (Gemini Flash)..."):
                 client = get_gemini_client(api_key)
-                st.session_state.conteudo_md       = gerar_conteudo_phc(
+                st.session_state.conteudo_md = gerar_conteudo_phc(
                     client, disciplina, ano_escolar, assunto, codigo_bncc
                 )
                 st.session_state.ultima_disciplina = disciplina
-                st.session_state.ultimo_ano        = ano_escolar
-                st.session_state.ultimo_assunto    = assunto
+                st.session_state.ultimo_ano = ano_escolar
+                st.session_state.ultimo_assunto = assunto
             st.success("✅ Material gerado com sucesso!")
         except APIError as e:
             if "503" in str(e) or "unavailable" in str(e).lower():
