@@ -66,8 +66,7 @@ def latex_para_png(expr: str, dpi: int = 110) -> bytes | None:
 
 def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
     """
-    Insere PNG LaTeX no PDF recalculando a altura e largura proporcionalmente
-    com base nos pixels reais gerados para manter escala e alinhamento naturais.
+    Insere PNG LaTeX preservando perfeitamente a linha de base (Y) do texto.
     """
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp.write(png_bytes)
@@ -78,12 +77,10 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
         with PILImage.open(io.BytesIO(png_bytes)) as img:
             w_px, h_px = img.size
 
-        # Fator de conversão mm/px ajustado para DPI 110 (~0.22 mm por px)
-        px_to_mm = 0.22
+        px_to_mm = 0.22  # Conversão ajustada para DPI 110
 
         if is_display:
-            # Para fórmulas em bloco (display $$)
-            h = min(h_px * px_to_mm, 12.0)  # Teto máximo para não estourar a página
+            h = min(h_px * px_to_mm, 12.0)
             w = h * (w_px / h_px)
             
             pdf.ln(3)
@@ -91,22 +88,29 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
             pdf.image(tmp_path, x=x_centro, y=pdf.get_y(), h=h, w=w)
             pdf.ln(h + 3)
         else:
-            # Para fórmulas em linha (inline $)
-            pdf.set_x(pdf.get_x() + 0.8)  # Espaçamento leve antes
+            # Salva o Y original da linha antes de inserir a imagem
+            y_base = pdf.get_y()
 
-            # Calcula altura natural e limita para não estourar o entrelinhas
-            h = min(h_px * px_to_mm, 4.2)
+            # Espaçamento de guarda antes da imagem
+            pdf.set_x(pdf.get_x() + 0.8)
+
+            h = min(h_px * px_to_mm, 4.0)
             w = h * (w_px / h_px)
 
-            # Quebra de linha se não couber na margem direita
+            # Se a imagem extrapolar a margem direita, faz quebra de linha
             if pdf.get_x() + w > pdf.w - pdf.r_margin:
                 pdf.ln(6.5)
                 pdf.set_x(pdf.l_margin)
+                y_base = pdf.get_y()
 
-            # Alinhamento vertical relativo à linha de texto (linha = 6.5mm)
-            y_img = pdf.get_y() + (6.5 - h) / 1.5
-            pdf.image(tmp_path, x=pdf.get_x(), y=y_img, h=h, w=w)
-            pdf.set_x(pdf.get_x() + w + 1.2)  # Espaçamento após a imagem
+            # Posiciona verticalmente para alinhar com o centro do texto
+            y_img = y_base + (6.5 - h) / 2
+            x_img = pdf.get_x()
+
+            pdf.image(tmp_path, x=x_img, y=y_img, h=h, w=w)
+
+            # Restauramos exatamente a coordenada Y original da linha de texto
+            pdf.set_xy(x_img + w + 1.2, y_base)
     finally:
         os.unlink(tmp_path)
 
@@ -114,10 +118,7 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
 # ── TOKENIZADOR ───────────────────────────────────────────────────────────────
 def tokenizar_linha(texto: str) -> list[dict]:
     """
-    Divide uma linha em tokens:
-      {"tipo": "texto",   "conteudo": "..."}
-      {"tipo": "display", "conteudo": "expr"}   — $$...$$
-      {"tipo": "inline",  "conteudo": "expr"}   — $...$
+    Divide uma linha em tokens (texto, display $$, inline $).
     """
     tokens = []
     i = 0
@@ -177,7 +178,7 @@ def tokenizar_linha(texto: str) -> list[dict]:
 
 # ── RENDERER DE TEXTO ─────────────────────────────────────────────────────────
 class TextRenderer:
-    """Renderiza texto puro com **negrito** via fpdf.write()."""
+    """Renderiza texto puro tratando **negrito** e *itálico*, removendo marcadores vazados."""
 
     def __init__(self, pdf: FPDF, font_name: str = "DejaVu", base_size: float = 10):
         self.pdf       = pdf
@@ -185,8 +186,7 @@ class TextRenderer:
         self.base_size = base_size
         self.lh        = 6.5
 
-    def _set(self, bold: bool = False):
-        style = "B" if bold else ""
+    def _set(self, style: str = ""):
         try:
             self.pdf.set_font(self.font_name, style, self.base_size)
         except Exception:
@@ -198,17 +198,37 @@ class TextRenderer:
         return t
 
     def write_span(self, text: str):
-        segmentos = re.split(r'(\*\*)', text)
+        """
+        Segmenta a string para aplicar formatação e garante a remoção de asteriscos.
+        """
+        # Suporta tanto **negrito** quanto *itálico*
+        partes = re.split(r'(\*\*|\*)', text)
         bold = False
-        for seg in segmentos:
-            if seg == "**":
+        italic = False
+
+        for p in partes:
+            if p == "**":
                 bold = not bold
                 continue
-            if not seg:
+            elif p == "*":
+                italic = not italic
                 continue
-            self._set(bold)
-            self.pdf.write(self.lh, self._encode(seg))
-        self._set(False)
+
+            if not p:
+                continue
+
+            # Define estilo combinado (B, I ou BI)
+            style = ""
+            if bold: style += "B"
+            if italic: style += "I"
+
+            self._set(style)
+            # Remove qualquer asterisco acidental residual do fragmento
+            limpo = p.replace("*", "")
+            if limpo:
+                self.pdf.write(self.lh, self._encode(limpo))
+
+        self._set("")  # Reseta para estilo normal
 
 
 # ── RENDERIZAÇÃO DE TOKENS ────────────────────────────────────────────────────
@@ -237,6 +257,7 @@ class PDFMaterial(FPDF):
         if FONT_DIR:
             self.add_font("DejaVu", style="",  fname=os.path.join(FONT_DIR, "DejaVuSans.ttf"))
             self.add_font("DejaVu", style="B", fname=os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"))
+            self.add_font("DejaVu", style="I", fname=os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf"))
 
     def header(self):
         fonte = "DejaVu" if FONT_DIR else "helvetica"
