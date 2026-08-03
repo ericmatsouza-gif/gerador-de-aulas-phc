@@ -52,8 +52,8 @@ FONT_DIR = _localizar_fontes_dejavu()
 # ── CODECOGS: LaTeX → PNG ─────────────────────────────────────────────────────
 CODECOGS_URL = "https://latex.codecogs.com/png.image?"
 
-def latex_para_png(expr: str, dpi: int = 120) -> bytes | None:
-    """Baixa PNG da expressão LaTeX via Codecogs. Retorna None em falha."""
+def latex_para_png(expr: str, dpi: int = 110) -> bytes | None:
+    """Baixa PNG da expressão LaTeX via Codecogs com DPI ajustado para fonte 10pt."""
     params = f"\\dpi{{{dpi}}}\\bg{{white}}{expr}"
     try:
         resp = requests.get(CODECOGS_URL + requests.utils.quote(params), timeout=8)
@@ -66,9 +66,8 @@ def latex_para_png(expr: str, dpi: int = 120) -> bytes | None:
 
 def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
     """
-    Insere PNG LaTeX no PDF.
-    - display ($$): centralizada, em linha própria, altura 8mm
-    - inline ($):   inline com o texto, altura 4.5mm
+    Insere PNG LaTeX no PDF recalculando a altura e largura proporcionalmente
+    com base nos pixels reais gerados para manter escala e alinhamento naturais.
     """
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp.write(png_bytes)
@@ -79,25 +78,35 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
         with PILImage.open(io.BytesIO(png_bytes)) as img:
             w_px, h_px = img.size
 
+        # Fator de conversão mm/px ajustado para DPI 110 (~0.22 mm por px)
+        px_to_mm = 0.22
+
         if is_display:
-            h = 8.0
+            # Para fórmulas em bloco (display $$)
+            h = min(h_px * px_to_mm, 12.0)  # Teto máximo para não estourar a página
             w = h * (w_px / h_px)
-            pdf.ln(4)
-            # Centraliza
+            
+            pdf.ln(3)
             x_centro = pdf.l_margin + (pdf.epw - w) / 2
             pdf.image(tmp_path, x=x_centro, y=pdf.get_y(), h=h, w=w)
-            pdf.ln(h + 4)
+            pdf.ln(h + 3)
         else:
-            h = 4.5
+            # Para fórmulas em linha (inline $)
+            pdf.set_x(pdf.get_x() + 0.8)  # Espaçamento leve antes
+
+            # Calcula altura natural e limita para não estourar o entrelinhas
+            h = min(h_px * px_to_mm, 4.2)
             w = h * (w_px / h_px)
-            # Quebra linha se não couber
+
+            # Quebra de linha se não couber na margem direita
             if pdf.get_x() + w > pdf.w - pdf.r_margin:
-                pdf.ln(h + 1)
+                pdf.ln(6.5)
                 pdf.set_x(pdf.l_margin)
-            # Alinha verticalmente ao centro da linha de texto (lh=6.5)
-            y_img = pdf.get_y() + (6.5 - h) / 2
+
+            # Alinhamento vertical relativo à linha de texto (linha = 6.5mm)
+            y_img = pdf.get_y() + (6.5 - h) / 1.5
             pdf.image(tmp_path, x=pdf.get_x(), y=y_img, h=h, w=w)
-            pdf.set_x(pdf.get_x() + w + 0.8)
+            pdf.set_x(pdf.get_x() + w + 1.2)  # Espaçamento após a imagem
     finally:
         os.unlink(tmp_path)
 
@@ -109,12 +118,6 @@ def tokenizar_linha(texto: str) -> list[dict]:
       {"tipo": "texto",   "conteudo": "..."}
       {"tipo": "display", "conteudo": "expr"}   — $$...$$
       {"tipo": "inline",  "conteudo": "expr"}   — $...$
-
-    Regras para não confundir com R$, US$, C$:
-      - $ precedido de letra é sempre texto normal.
-      - Para inline, o $ de abertura deve ser seguido de não-espaço.
-      - Para inline, o $ de fechamento deve ser seguido de não-letra/dígito
-        (evita partir no meio de "R$ 1.300").
     """
     tokens = []
     i = 0
@@ -139,20 +142,14 @@ def tokenizar_linha(texto: str) -> list[dict]:
 
         # ── Inline $...$ ─────────────────────────────────────────────────────
         if texto[i] == "$":
-            # Ignorar se precedido de letra ou dígito (R$, US$, 2$...)
             precedido = i > 0 and (texto[i - 1].isalpha() or texto[i - 1].isdigit())
-            # Ignorar se seguido de espaço ou fim de string (não é abertura válida)
             seguido_valido = (i + 1 < n) and texto[i + 1] not in (" ", "\t", "")
 
             if not precedido and seguido_valido:
-                # Procura fechamento: próximo $ que não seja precedido de espaço
-                # e não seja seguido de letra/dígito
                 j = i + 1
                 fechamento = -1
                 while j < n:
                     if texto[j] == "$":
-                        # $ de fechamento válido: não precedido de espaço
-                        # e seguido de separador (espaço, pontuação, fim)
                         prec_ok = texto[j - 1] != " "
                         segu = texto[j + 1] if j + 1 < n else ""
                         segu_ok = segu == "" or not segu.isalnum()
@@ -201,11 +198,6 @@ class TextRenderer:
         return t
 
     def write_span(self, text: str):
-        """
-        Escreve texto com suporte a **negrito**.
-        Usa re.split para garantir que múltiplos ** na mesma linha funcionem.
-        """
-        # Divide em segmentos: texto normal e marcadores **
         segmentos = re.split(r'(\*\*)', text)
         bold = False
         for seg in segmentos:
@@ -216,7 +208,6 @@ class TextRenderer:
                 continue
             self._set(bold)
             self.pdf.write(self.lh, self._encode(seg))
-        # Garante que o estado de negrito não vaze para a próxima linha
         self._set(False)
 
 
@@ -233,7 +224,6 @@ def _renderizar_tokens(pdf: FPDF, renderer: TextRenderer, texto: str):
             if png:
                 inserir_imagem_latex(pdf, png, is_display)
             else:
-                # Fallback legível se Codecogs falhar
                 renderer.write_span(tok["conteudo"])
 
 
@@ -270,12 +260,12 @@ class PDFMaterial(FPDF):
         fonte = "DejaVu" if FONT_DIR else "helvetica"
         self.set_font(fonte, "", 8)
         self.set_text_color(130, 130, 130)
-        self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", align="R")
+        self.cell(0, 10, f"Página {self.page_no()}/{'{nb}'}", align="R")
 
 
 # ── COMPILADOR PDF ────────────────────────────────────────────────────────────
 def compilar_pdf(texto_md: str, disciplina: str,
-                  ano_escolar: str, assunto: str) -> bytes:
+                 ano_escolar: str, assunto: str) -> bytes:
     pdf = PDFMaterial(disciplina, ano_escolar, assunto)
     pdf.alias_nb_pages()
     pdf.set_margins(15, 20, 15)
@@ -385,8 +375,9 @@ Estrutura obrigatória (use exatamente estes cabeçalhos):
 # 4. Gabarito
 
 REGRAS DE FORMATAÇÃO — siga rigorosamente:
-- Expressões matemáticas inline: $expressão$ — exemplo: O valor de $x^2$ é positivo.
-- Expressões matemáticas em destaque (fórmulas, equações): $$expressão$$ — exemplo: $$M = C \\cdot (1+i)^t$$
+- Use LaTeX ($...$) APENAS para variáveis, expressões, fórmulas e símbolos matemáticos (ex: $x$, $A = l^2$).
+- NUNCA coloque números isolados ou texto simples dentro de $ (escreva "3 voltas", "4 lados" normalmente como texto).
+- Expressões matemáticas em destaque (fórmulas, equações em bloco): $$expressão$$ — exemplo: $$M = C \\cdot (1+i)^t$$
 - Use LaTeX padrão: \\frac{{num}}{{den}}, \\sqrt{{x}}, \\sqrt[3]{{x}}, x^{{2}}, \\cdot, \\pm, \\leq, \\geq
 - NÃO use $ para indicar moeda (escreva "reais", "R$" com espaço após o símbolo, ou "BRL").
 - NÃO use blocos ```math``` ou \\[ \\].
