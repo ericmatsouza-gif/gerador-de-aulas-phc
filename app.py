@@ -54,9 +54,11 @@ FONT_DIR = _localizar_fontes_dejavu()
 CODECOGS_URL = "https://latex.codecogs.com/png.image?"
 
 
-def latex_para_png(expr: str, dpi: int = 110) -> bytes | None:
-    """Baixa PNG da expressão LaTeX via Codecogs com DPI ajustado para fonte 10pt."""
-    params = f"\\dpi{{{dpi}}}\\bg{{white}}{expr}"
+def latex_para_png(expr: str, dpi: int = 150) -> bytes | None:
+    """Baixa PNG da expressão LaTeX via Codecogs com DPI elevado para legibilidade."""
+    # Adiciona \dpi e limpa espaços extras na expressão
+    expr_limpa = expr.strip()
+    params = f"\\dpi{{{dpi}}}\\bg{{white}}{expr_limpa}"
     try:
         resp = requests.get(CODECOGS_URL + requests.utils.quote(params), timeout=8)
         if resp.status_code == 200 and resp.content:
@@ -68,7 +70,7 @@ def latex_para_png(expr: str, dpi: int = 110) -> bytes | None:
 
 def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
     """
-    Insere PNG LaTeX ajustando o tamanho dinamicamente para preservar a legibilidade.
+    Insere PNG LaTeX preservando a proporção de altura e escala adequada para frações.
     """
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp.write(png_bytes)
@@ -79,10 +81,11 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
         with PILImage.open(io.BytesIO(png_bytes)) as img:
             w_px, h_px = img.size
 
-        px_to_mm = 0.22  # Fator base para DPI 110
+        # Fator de conversão ajustado para DPI 150 (1px = 0.169mm)
+        px_to_mm = 0.169
 
         if is_display:
-            h = min(h_px * px_to_mm, 14.0)
+            h = min(h_px * px_to_mm, 15.0)
             w = h * (w_px / h_px)
 
             pdf.ln(6.5)
@@ -96,18 +99,17 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
             y_base = pdf.get_y()
             pdf.set_x(pdf.get_x() + 0.8)
 
-            # Ajuste dinâmico: permite até 7.0mm se a imagem tiver frações/múltiplas linhas
+            # Para inline, calcula altura proporcional. Se tiver fração, h_px é maior.
             h_calculado = h_px * px_to_mm
-            h = min(max(h_calculado, 3.5), 7.0) 
+            h = min(max(h_calculado, 3.8), 8.5)  # Permite até 8.5mm para acomodar frações legíveis
             w = h * (w_px / h_px)
 
-            # Quebra de linha caso ultrapasse a margem
+            # Se extrapolar a margem direita, realiza a quebra de linha
             if pdf.get_x() + w > pdf.w - pdf.r_margin:
-                pdf.ln(7.0)
+                pdf.ln(renderer.lh if 'renderer' in locals() else 6.5)
                 pdf.set_x(pdf.l_margin)
                 y_base = pdf.get_y()
 
-            # Centraliza a imagem verticalmente em relação ao texto da linha
             y_img = y_base + (6.5 - h) / 2
             x_img = pdf.get_x()
 
@@ -116,16 +118,21 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
     finally:
         os.unlink(tmp_path)
 
-
 # ── TOKENIZADOR ───────────────────────────────────────────────────────────────
 def tokenizar_linha(texto: str) -> list[dict]:
     """
     Divide uma linha em tokens (texto, display $$, inline $).
-    Protege o R$ monetário para não quebrar a tokenização.
+    Protege expressões monetárias como R$, R\$, $R$ e números com $ no final.
     """
-    # Escapa "R$" temporariamente para não confundir o parser de LaTeX
-    texto_seguro = texto.replace("R$", "R\\$")
+    # 1. Normaliza e protege variações monetárias frequentes
+    texto_tratado = texto.replace("R\\$", "R$")
+    texto_tratado = re.sub(r'\$?\s*R\$\s*(\d+)', r'R$ \1', texto_tratado)  # Ex: $R$ 16,00$ -> R$ 16,00
+    texto_tratado = re.sub(r'(\d+[\d\.,]*)\$', r'\1', texto_tratado)       # Remove $ no final do valor (ex: 16,00$)
     
+    # Substitui temporariamente "R$" por uma tag neutra para não acionar o parser de LaTeX
+    TAG_MOEDA = "___MOEDA_REAIS___"
+    texto_seguro = texto_tratado.replace("R$", TAG_MOEDA)
+
     tokens = []
     i = 0
     buf = ""
@@ -135,7 +142,7 @@ def tokenizar_linha(texto: str) -> list[dict]:
         # ── Display $$...$$ ──────────────────────────────────────────────────
         if texto_seguro.startswith("$$", i):
             if buf:
-                tokens.append({"tipo": "texto", "conteudo": buf.replace("R\\$", "R$")})
+                tokens.append({"tipo": "texto", "conteudo": buf.replace(TAG_MOEDA, "R$")})
                 buf = ""
             j = texto_seguro.find("$$", i + 2)
             if j != -1:
@@ -166,7 +173,7 @@ def tokenizar_linha(texto: str) -> list[dict]:
 
                 if fechamento != -1:
                     if buf:
-                        tokens.append({"tipo": "texto", "conteudo": buf.replace("R\\$", "R$")})
+                        tokens.append({"tipo": "texto", "conteudo": buf.replace(TAG_MOEDA, "R$")})
                         buf = ""
                     tokens.append({"tipo": "inline", "conteudo": texto_seguro[i + 1:fechamento]})
                     i = fechamento + 1
@@ -176,9 +183,11 @@ def tokenizar_linha(texto: str) -> list[dict]:
         i += 1
 
     if buf:
-        tokens.append({"tipo": "texto", "conteudo": buf.replace("R\\$", "R$")})
+        tokens.append({"tipo": "texto", "conteudo": buf.replace(TAG_MOEDA, "R$")})
 
     return tokens
+
+
 
 
 # ── RENDERER DE TEXTO ─────────────────────────────────────────────────────────
@@ -427,14 +436,13 @@ def gerar_conteudo_phc(client, disciplina: str, ano_escolar: str,
 REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
 - NUNCA use blocos de código (triplas crases ```) para formatar texto, exemplos ou matemática.
 - NUNCA escreva notação matemática solta no texto como 3^0, 3^1, x^2. Use SEMPRE a notação LaTeX embutida: $3^0$, $3^1$, $x^2$.
+- NUNCA inclua hífens ou marcadores de lista DENTRO das expressões LaTeX (exemplo ERRADO: "- $x = 1$", exemplo CORRETO: "- $x = 1$").
 - Para exibições em listas ou passos organizados, use listas comuns do Markdown (com traço "-") e insira as variáveis/expressões em LaTeX. Exemplo:
   - Instante $t = 0$: 1 pessoa original ($3^0$)
   - Instante $t = 1$: 3 novas pessoas ($3^1$)
-- Use LaTeX inline ($...$) apenas para variáveis isoladas, igualdades simples, expoentes curtos ou nomes de conceitos (ex: $x$, $a = 1$, $x^2$).
-- Expressões matemáticas complexas, com frações (\\frac), raízes, passos operacionais longos ou equações completas DEVEM ser obrigatoriamente formatadas em bloco (display): $$expressão$$ — exemplo: $$M = C \\cdot (1+i)^t$$ ou $$x = \\frac{{-b \\pm \\sqrt{{\\Delta}}}}{{2a}}$$
-- Use notação LaTeX padrão: \\frac{{num}}{{den}}, \\sqrt{{x}}, \\sqrt[3]{{x}}, x^{{2}}, \\cdot, \\pm, \\leq, \\geq
-- NUNCA coloque números isolados ou texto simples dentro de $ (escreva "3 voltas", "4 lados" normalmente como texto).
-- NUNCA use o símbolo de cifrão $ para indicar moeda ou dinheiro. Escreva sempre como texto normal (exemplo: "R$ 15,00", "15,00 reais" ou "BRL") e NUNCA envolva valores monetários com cifrões de LaTeX (como $R$ 15,00$ ou $15,00$).
+- Use LaTeX inline ($...$) apenas para variáveis isoladas ou igualdades curtas (ex: $x$, $a = 1$, $x_1$).
+- Passo a passo de equações com frações (\\frac), raízes ou resoluções de problemas DEVEM ser obrigatoriamente formatados em bloco (display): $$expressão$$
+- NUNCA use o símbolo de cifrão $ para indicar moeda ou dinheiro. Escreva SEMPRE o valor em formato de texto simples (exemplo: R$ 16,00 ou R$ 8.450,00) e NUNCA envolva valores em Reais com cifrões de LaTeX ($R$ 16,00$, $16,00$ ou \$R\$).
 - Negrito para termos importantes: **termo**.
 - Texto corrido em português fora dos delimitadores matemáticos.
 """
