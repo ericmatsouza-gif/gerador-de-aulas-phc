@@ -185,7 +185,7 @@ def tokenizar_linha(texto: str) -> list[dict]:
 
 # ── RENDERER DE TEXTO ─────────────────────────────────────────────────────────
 class TextRenderer:
-    """Renderiza texto puro tratando **negrito** e *itálico*, removendo marcadores vazados."""
+    """Renderiza texto puro tratando **negrito** e *itálico*, removendo marcadores e sanitizando caracteres."""
 
     def __init__(self, pdf: FPDF, font_name: str = "DejaVu", base_size: float = 10):
         self.pdf       = pdf
@@ -200,15 +200,14 @@ class TextRenderer:
             self.pdf.set_font("helvetica", style, self.base_size)
 
     def _encode(self, t: str) -> str:
+        # Substitui travessões longos (—) e médios (–) por hífen simples (-)
+        t = t.replace("—", "-").replace("–", "-")
+        
         if self.pdf.font_family.lower() == "helvetica":
             return t.encode("latin-1", "replace").decode("latin-1")
         return t
 
     def write_span(self, text: str):
-        """
-        Segmenta a string para aplicar formatação e garante a remoção de asteriscos.
-        """
-        # Suporta tanto **negrito** quanto *itálico*
         partes = re.split(r'(\*\*|\*)', text)
         bold = False
         italic = False
@@ -224,18 +223,16 @@ class TextRenderer:
             if not p:
                 continue
 
-            # Define estilo combinado (B, I ou BI)
             style = ""
             if bold: style += "B"
             if italic: style += "I"
 
             self._set(style)
-            # Remove qualquer asterisco acidental residual do fragmento
             limpo = p.replace("*", "")
             if limpo:
                 self.pdf.write(self.lh, self._encode(limpo))
 
-        self._set("")  # Reseta para estilo normal
+        self._set("")
 
 
 # ── RENDERIZAÇÃO DE TOKENS ────────────────────────────────────────────────────
