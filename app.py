@@ -400,7 +400,7 @@ def gerar_conteudo_phc(client, disciplina: str, ano_escolar: str,
     - Disciplina: {disciplina}
     - Ano/Série: {ano_escolar}
     - Conteúdo/Assunto: {assunto}
-    {bloco_bncc}
+    {codigo_bncc}
  
     ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
     1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido
