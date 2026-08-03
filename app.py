@@ -263,24 +263,24 @@ class PDFMaterial(FPDF):
             self.add_font("DejaVu", style="B", fname=os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"))
             self.add_font("DejaVu", style="I", fname=os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf"))
 
-  def header(self):
-    # Renderiza o cabeçalho APENAS na primeira página
-    if self.page_no() == 1:
-        fonte = "DejaVu" if FONT_DIR else "helvetica"
-        self.set_font(fonte, "B", 12)
-        self.set_text_color(26, 42, 58)
-        self.cell(0, 10, "PLANO DE AULA E MATERIAL DIDÁTICO",
-                  align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        self.set_font(fonte, "B", 9)
-        self.set_text_color(41, 128, 185)
-        self.cell(0, 5,
-                  f"{self.disciplina.upper()} | {self.ano_escolar} | Assunto: {self.assunto}",
-                  align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        self.ln(2)
-        self.set_draw_color(41, 128, 185)
-        self.set_line_width(0.5)
-        self.line(15, self.get_y(), 195, self.get_y())
-        self.ln(5)
+      def header(self):
+        # Renderiza o cabeçalho APENAS na primeira página
+        if self.page_no() == 1:
+            fonte = "DejaVu" if FONT_DIR else "helvetica"
+            self.set_font(fonte, "B", 12)
+            self.set_text_color(26, 42, 58)
+            self.cell(0, 10, "PLANO DE AULA E MATERIAL DIDÁTICO",
+                      align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.set_font(fonte, "B", 9)
+            self.set_text_color(41, 128, 185)
+            self.cell(0, 5,
+                      f"{self.disciplina.upper()} | {self.ano_escolar} | Assunto: {self.assunto}",
+                      align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.ln(2)
+            self.set_draw_color(41, 128, 185)
+            self.set_line_width(0.5)
+            self.line(15, self.get_y(), 195, self.get_y())
+            self.ln(5)
 
     def footer(self):
         self.set_y(-15)
