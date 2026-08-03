@@ -390,11 +390,18 @@ def get_gemini_client(api_key: str) -> genai.Client:
 
 
 def gerar_conteudo_phc(client, disciplina: str, ano_escolar: str,
-                       assunto: str, codigo_bncc: str = "") -> str:
+                       assunto: str, nivel_dificuldade: str = "Intermediário",
+                       codigo_bncc: str = "") -> str:
+    
     bncc_str = f"com referência à BNCC: {codigo_bncc}" if codigo_bncc else ""
+    
     prompt = f"""Você é um professor de {disciplina} do {ano_escolar} seguindo a Pedagogia Histórico-Crítica (PHC).
 
 Gere um plano de aula completo sobre "{assunto}" {bncc_str}.
+
+NÍVEL DE DIFICULDADE DO MATERIAL: {nivel_dificuldade.upper()}
+- Ajuste a profundidade dos conceitos, a complexidade dos problemas e a linguagem pedagógica para o nível {nivel_dificuldade}.
+- Se {nivel_dificuldade} == Prefeitura Municipal de Casimiro de Abreu: o nível é abaixo do básico.
 
 Estrutura obrigatória (use exatamente estes cabeçalhos):
 # 1. Prática Social
@@ -443,11 +450,16 @@ api_key = os.getenv("GEMINI_API_KEY", "")
 if not api_key:
     api_key = st.text_input("🔑 Chave API Gemini:", type="password")
 
-col_disc, col_ano = st.columns(2)
+col_disc, col_ano, col_dif = st.columns(3)
 with col_disc:
     disciplina = st.text_input("Disciplina", placeholder="Ex: Matemática")
 with col_ano:
     ano_escolar = st.text_input("Ano / Série", placeholder="Ex: 9º ano")
+with col_dif:
+    nivel_dificuldade = st.selectbox(
+        "Nível de Dificuldade",
+        options=["Prefeitura Municipal de Casimiro de Abreu", "Básico", "Intermediário", "Avançado"]
+    )
 
 assunto = st.text_input("Assunto", placeholder="Ex: Potenciação")
 codigo_bncc = st.text_input("🎯 BNCC (opcional)")
@@ -464,7 +476,12 @@ if st.button("✨ Gerar Material Didático"):
             with st.spinner("🧠 Elaborando material (Gemini Flash)..."):
                 client = get_gemini_client(api_key)
                 st.session_state.conteudo_md = gerar_conteudo_phc(
-                    client, disciplina, ano_escolar, assunto, codigo_bncc
+                    client,
+                    disciplina,
+                    ano_escolar,
+                    assunto,
+                    nivel_dificuldade,
+                    codigo_bncc,
                 )
                 st.session_state.ultima_disciplina = disciplina
                 st.session_state.ultimo_ano = ano_escolar
