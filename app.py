@@ -488,8 +488,11 @@ if st.button("✨ Gerar Material Didático"):
                 st.session_state.ultimo_assunto = assunto
             st.success("✅ Material gerado com sucesso!")
         except APIError as e:
-            if "503" in str(e) or "unavailable" in str(e).lower():
-                st.error("⚠️ Servidor ocupado. Tente novamente em alguns segundos.")
+            erro_msg = str(e).lower()
+            if "429" in erro_msg or "resource_exhausted" in erro_msg:
+                st.error("⏳ Limite de requisições atingido (Cota Gratuita). Por favor, aguarde alguns minutos antes de tentar novamente.")
+            elif "503" in erro_msg or "unavailable" in erro_msg:
+                st.error("⚠️ Servidor ocupado no momento. Tente novamente em alguns segundos.")
             else:
                 st.error(f"❌ Erro na API Gemini: {e}")
         except Exception as e:
