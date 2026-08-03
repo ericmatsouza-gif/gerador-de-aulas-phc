@@ -292,7 +292,6 @@ class PDFMaterial(FPDF):
 
 
 # ── COMPILADOR PDF ────────────────────────────────────────────────────────────
-# ── COMPILADOR PDF ────────────────────────────────────────────────────────────
 def compilar_pdf(texto_md: str, disciplina: str,
                  ano_escolar: str, assunto: str) -> bytes:
     pdf = PDFMaterial(disciplina, ano_escolar, assunto)
