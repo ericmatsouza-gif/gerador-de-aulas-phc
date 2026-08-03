@@ -263,7 +263,9 @@ class PDFMaterial(FPDF):
             self.add_font("DejaVu", style="B", fname=os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf"))
             self.add_font("DejaVu", style="I", fname=os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf"))
 
-    def header(self):
+  def header(self):
+    # Renderiza o cabeçalho APENAS na primeira página
+    if self.page_no() == 1:
         fonte = "DejaVu" if FONT_DIR else "helvetica"
         self.set_font(fonte, "B", 12)
         self.set_text_color(26, 42, 58)
