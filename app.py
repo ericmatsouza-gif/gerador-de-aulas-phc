@@ -135,7 +135,11 @@ def tokenizar_linha(texto: str) -> list[dict]:
     while i < n:
 
         # ── Display $$...$$ ──────────────────────────────────────────────────
-        if texto.startswith("$$", i):             if buf:                 tokens.append({"tipo": "texto", "conteudo": buf})                 buf = ""             j = texto.find("$$", i + 2)
+        if texto.startswith("$$", i):
+            if buf:
+                tokens.append({"tipo": "texto", "conteudo": buf})
+                buf = ""
+            j = texto.find("$$", i + 2)
             if j != -1:
                 tokens.append({"tipo": "display", "conteudo": texto[i + 2:j]})
                 i = j + 2
@@ -177,7 +181,6 @@ def tokenizar_linha(texto: str) -> list[dict]:
         tokens.append({"tipo": "texto", "conteudo": buf})
 
     return tokens
-
 
 # ── RENDERER DE TEXTO ─────────────────────────────────────────────────────────
 class TextRenderer:
