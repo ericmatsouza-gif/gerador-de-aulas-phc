@@ -68,7 +68,7 @@ def latex_para_png(expr: str, dpi: int = 110) -> bytes | None:
 
 def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
     """
-    Insere PNG LaTeX preservando a linha de base ou forçando quebra em fórmulas de bloco (display).
+    Insere PNG LaTeX ajustando o tamanho dinamicamente para preservar a legibilidade.
     """
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp.write(png_bytes)
@@ -79,45 +79,39 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
         with PILImage.open(io.BytesIO(png_bytes)) as img:
             w_px, h_px = img.size
 
-        px_to_mm = 0.22  # Conversão para DPI 110
+        px_to_mm = 0.22  # Fator base para DPI 110
 
         if is_display:
-            h = min(h_px * px_to_mm, 12.0)
+            h = min(h_px * px_to_mm, 14.0)
             w = h * (w_px / h_px)
 
-            # Força a quebra de linha e vai para a margem esquerda antes do bloco
             pdf.ln(6.5)
             pdf.set_x(pdf.l_margin)
-
             x_centro = pdf.l_margin + (pdf.epw - w) / 2
             pdf.image(tmp_path, x=x_centro, y=pdf.get_y(), h=h, w=w)
 
-            # Avança a altura da imagem + espaçamento e reseta o X
             pdf.set_y(pdf.get_y() + h + 3)
             pdf.set_x(pdf.l_margin)
         else:
-            # Salva o Y original da linha antes de inserir a imagem inline
             y_base = pdf.get_y()
-
-            # Espaçamento de guarda antes da imagem
             pdf.set_x(pdf.get_x() + 0.8)
 
-            h = min(h_px * px_to_mm, 4.0)
+            # Ajuste dinâmico: permite até 7.0mm se a imagem tiver frações/múltiplas linhas
+            h_calculado = h_px * px_to_mm
+            h = min(max(h_calculado, 3.5), 7.0) 
             w = h * (w_px / h_px)
 
-            # Se a imagem extrapolar a margem direita, faz quebra de linha
+            # Quebra de linha caso ultrapasse a margem
             if pdf.get_x() + w > pdf.w - pdf.r_margin:
-                pdf.ln(6.5)
+                pdf.ln(7.0)
                 pdf.set_x(pdf.l_margin)
                 y_base = pdf.get_y()
 
-            # Posiciona verticalmente para alinhar com o centro do texto
+            # Centraliza a imagem verticalmente em relação ao texto da linha
             y_img = y_base + (6.5 - h) / 2
             x_img = pdf.get_x()
 
             pdf.image(tmp_path, x=x_img, y=y_img, h=h, w=w)
-
-            # Restaura exatamente a coordenada Y original da linha de texto
             pdf.set_xy(x_img + w + 1.2, y_base)
     finally:
         os.unlink(tmp_path)
@@ -127,40 +121,43 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
 def tokenizar_linha(texto: str) -> list[dict]:
     """
     Divide uma linha em tokens (texto, display $$, inline $).
+    Protege o R$ monetário para não quebrar a tokenização.
     """
+    # Escapa "R$" temporariamente para não confundir o parser de LaTeX
+    texto_seguro = texto.replace("R$", "R\\$")
+    
     tokens = []
     i = 0
     buf = ""
-    n = len(texto)
+    n = len(texto_seguro)
 
     while i < n:
-
         # ── Display $$...$$ ──────────────────────────────────────────────────
-        if texto.startswith("$$", i):
+        if texto_seguro.startswith("$$", i):
             if buf:
-                tokens.append({"tipo": "texto", "conteudo": buf})
+                tokens.append({"tipo": "texto", "conteudo": buf.replace("R\\$", "R$")})
                 buf = ""
-            j = texto.find("$$", i + 2)
+            j = texto_seguro.find("$$", i + 2)
             if j != -1:
-                tokens.append({"tipo": "display", "conteudo": texto[i + 2:j]})
+                tokens.append({"tipo": "display", "conteudo": texto_seguro[i + 2:j]})
                 i = j + 2
             else:
-                buf += texto[i]
+                buf += texto_seguro[i]
                 i += 1
             continue
 
         # ── Inline $...$ ─────────────────────────────────────────────────────
-        if texto[i] == "$":
-            precedido = i > 0 and (texto[i - 1].isalpha() or texto[i - 1].isdigit())
-            seguido_valido = (i + 1 < n) and texto[i + 1] not in (" ", "\t", "")
+        if texto_seguro[i] == "$":
+            precedido = i > 0 and (texto_seguro[i - 1].isalpha() or texto_seguro[i - 1].isdigit())
+            seguido_valido = (i + 1 < n) and texto_seguro[i + 1] not in (" ", "\t", "")
 
             if not precedido and seguido_valido:
                 j = i + 1
                 fechamento = -1
                 while j < n:
-                    if texto[j] == "$":
-                        prec_ok = texto[j - 1] != " "
-                        segu = texto[j + 1] if j + 1 < n else ""
+                    if texto_seguro[j] == "$":
+                        prec_ok = texto_seguro[j - 1] != " "
+                        segu = texto_seguro[j + 1] if j + 1 < n else ""
                         segu_ok = segu == "" or not segu.isalnum()
                         if prec_ok and segu_ok:
                             fechamento = j
@@ -169,17 +166,17 @@ def tokenizar_linha(texto: str) -> list[dict]:
 
                 if fechamento != -1:
                     if buf:
-                        tokens.append({"tipo": "texto", "conteudo": buf})
+                        tokens.append({"tipo": "texto", "conteudo": buf.replace("R\\$", "R$")})
                         buf = ""
-                    tokens.append({"tipo": "inline", "conteudo": texto[i + 1:fechamento]})
+                    tokens.append({"tipo": "inline", "conteudo": texto_seguro[i + 1:fechamento]})
                     i = fechamento + 1
                     continue
 
-        buf += texto[i]
+        buf += texto_seguro[i]
         i += 1
 
     if buf:
-        tokens.append({"tipo": "texto", "conteudo": buf})
+        tokens.append({"tipo": "texto", "conteudo": buf.replace("R\\$", "R$")})
 
     return tokens
 
@@ -250,8 +247,6 @@ def _renderizar_tokens(pdf: FPDF, renderer: TextRenderer, texto: str):
             else:
                 renderer.write_span(tok["conteudo"])
 
-
-# ── CLASSE PDF ────────────────────────────────────────────────────────────────
 # ── CLASSE PDF ────────────────────────────────────────────────────────────────
 class PDFMaterial(FPDF):
     def __init__(self, disciplina: str, ano_escolar: str, assunto: str):
@@ -435,11 +430,11 @@ REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
 - Para exibições em listas ou passos organizados, use listas comuns do Markdown (com traço "-") e insira as variáveis/expressões em LaTeX. Exemplo:
   - Instante $t = 0$: 1 pessoa original ($3^0$)
   - Instante $t = 1$: 3 novas pessoas ($3^1$)
-- Use LaTeX ($...$) para QUALQUER variável, expressão, fórmula, igualdade ou notação de potência/radiciação no texto (ex: $t = 0$, $x$, $A = l^2$).
-- Expressões matemáticas em destaque (fórmulas, equações em bloco próprio): $$expressão$$ — exemplo: $$M = C \\cdot (1+i)^t$$
+- Use LaTeX inline ($...$) apenas para variáveis isoladas, igualdades simples, expoentes curtos ou nomes de conceitos (ex: $x$, $a = 1$, $x^2$).
+- Expressões matemáticas complexas, com frações (\\frac), raízes, passos operacionais longos ou equações completas DEVEM ser obrigatoriamente formatadas em bloco (display): $$expressão$$ — exemplo: $$M = C \\cdot (1+i)^t$$ ou $$x = \\frac{{-b \\pm \\sqrt{{\\Delta}}}}{{2a}}$$
 - Use notação LaTeX padrão: \\frac{{num}}{{den}}, \\sqrt{{x}}, \\sqrt[3]{{x}}, x^{{2}}, \\cdot, \\pm, \\leq, \\geq
 - NUNCA coloque números isolados ou texto simples dentro de $ (escreva "3 voltas", "4 lados" normalmente como texto).
-- NÃO use $ para indicar moeda (escreva "reais", "R$" com espaço após o símbolo, ou "BRL").
+- NUNCA use o símbolo de cifrão $ para indicar moeda ou dinheiro. Escreva sempre como texto normal (exemplo: "R$ 15,00", "15,00 reais" ou "BRL") e NUNCA envolva valores monetários com cifrões de LaTeX (como $R$ 15,00$ ou $15,00$).
 - Negrito para termos importantes: **termo**.
 - Texto corrido em português fora dos delimitadores matemáticos.
 """
