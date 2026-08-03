@@ -80,30 +80,27 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, fonte: str,
         tmp_path = tmp.name
 
     try:
-        # Altura alvo em mm proporcional ao tamanho da fonte
-        # 1 pt ≈ 0.353 mm; usamos 1.8x para dar margem visual
-        h_alvo = base_size * 0.353 * 1.8
+        # Altura fixa: 5mm inline, 7mm para display
+        h_inline  = 5.0
+        h_display = 7.0
 
         if is_display:
-            # Bloco centralizado — nova linha antes e depois
             pdf.ln(3)
-            pdf.image(tmp_path, x=None, y=None, h=h_alvo * 1.4)
-            pdf.ln(3)
+            pdf.image(tmp_path, x=None, y=None, h=h_display)
+            pdf.ln(4)
         else:
-            # Inline — insere na posição atual do cursor
-            # Calcula a largura proporcional a partir dos bytes
+            # Calcula largura proporcional mantendo aspect ratio
             from PIL import Image as PILImage
             with PILImage.open(io.BytesIO(png_bytes)) as img:
                 w_px, h_px = img.size
-            ratio = w_px / h_px
-            w_alvo = h_alvo * ratio
+            w_alvo = h_inline * (w_px / h_px)
 
-            # Verifica se cabe na linha; se não, quebra
+            # Quebra linha se não couber
             if pdf.get_x() + w_alvo > pdf.w - pdf.r_margin:
-                pdf.ln(h_alvo + 1)
+                pdf.ln(h_inline + 1)
                 pdf.set_x(pdf.l_margin)
 
-            pdf.image(tmp_path, x=pdf.get_x(), y=pdf.get_y(), h=h_alvo, w=w_alvo)
+            pdf.image(tmp_path, x=pdf.get_x(), y=pdf.get_y(), h=h_inline, w=w_alvo)
             pdf.set_x(pdf.get_x() + w_alvo + 0.5)
     finally:
         os.unlink(tmp_path)
@@ -137,17 +134,24 @@ def tokenizar_linha(texto: str) -> list[dict]:
             continue
 
         # Inline math $...$
+        # Ignora $ precedido de letra (ex: R$, US$) — trata como texto normal
         if texto[i] == "$":
-            if buf:
-                tokens.append({"tipo": "texto", "conteudo": buf})
-                buf = ""
-            j = texto.find("$", i + 1)
-            if j != -1:
-                tokens.append({"tipo": "inline", "conteudo": texto[i + 1:j]})
-                i = j + 1
-            else:
-                buf += texto[i]
-                i += 1
+            precedido_de_letra = i > 0 and texto[i - 1].isalpha()
+            if not precedido_de_letra:
+                if buf:
+                    tokens.append({"tipo": "texto", "conteudo": buf})
+                    buf = ""
+                j = texto.find("$", i + 1)
+                # Só interpreta como LaTeX se o fechamento não for precedido de letra
+                if j != -1 and (j == 0 or not texto[j - 1].isalpha()):
+                    tokens.append({"tipo": "inline", "conteudo": texto[i + 1:j]})
+                    i = j + 1
+                    continue
+                else:
+                    # Restaura o buf e cai no caractere normal
+                    pass
+            buf += texto[i]
+            i += 1
             continue
 
         buf += texto[i]
@@ -393,7 +397,7 @@ REGRAS DE FORMATAÇÃO:
 """
     config   = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
     response = client.models.generate_content(
-        model="gemini-flash-latest", contents=prompt, config=config
+        model="gemini-2.0-flash", contents=prompt, config=config
     )
     return response.text
 
