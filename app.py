@@ -66,7 +66,7 @@ def latex_para_png(expr: str, dpi: int = 110) -> bytes | None:
 
 def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
     """
-    Insere PNG LaTeX preservando a linha de base ou forçando quebra em fórmulas de bloco (display).
+    Insere PNG LaTeX mantendo proporção de fonte constante mesmo para frações/expressões altas.
     """
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp.write(png_bytes)
@@ -80,42 +80,43 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
         px_to_mm = 0.22  # Conversão para DPI 110
 
         if is_display:
+            # Em bloco (display), permite altura até 12mm
             h = min(h_px * px_to_mm, 12.0)
             w = h * (w_px / h_px)
             
-            # Força a quebra de linha e vai para a margem esquerda antes do bloco
             pdf.ln(6.5)
             pdf.set_x(pdf.l_margin)
             
             x_centro = pdf.l_margin + (pdf.epw - w) / 2
             pdf.image(tmp_path, x=x_centro, y=pdf.get_y(), h=h, w=w)
             
-            # Avança a altura da imagem + espaçamento e reseta o X
             pdf.set_y(pdf.get_y() + h + 3)
             pdf.set_x(pdf.l_margin)
         else:
-            # Salva o Y original da linha antes de inserir a imagem inline
-            y_base = pdf.get_y()
+            # Em linha (inline): calcula largura natural para manter o tamanho do texto/fonte uniforme
+            w_calculado = w_px * px_to_mm
+            h_calculado = h_px * px_to_mm
 
-            # Espaçamento de guarda antes da imagem
+            # Se a imagem for muito alta (ex: frações), permite até 6.5mm em vez de travar em 4.0mm
+            h = min(h_calculado, 6.5)
+            w = w_calculado * (h / h_calculado)
+
+            y_base = pdf.get_y()
             pdf.set_x(pdf.get_x() + 0.8)
 
-            h = min(h_px * px_to_mm, 4.0)
-            w = h * (w_px / h_px)
-
-            # Se a imagem extrapolar a margem direita, faz quebra de linha
+            # Quebra de linha se extrapolar a margem
             if pdf.get_x() + w > pdf.w - pdf.r_margin:
                 pdf.ln(6.5)
                 pdf.set_x(pdf.l_margin)
                 y_base = pdf.get_y()
 
-            # Posiciona verticalmente para alinhar com o centro do texto
+            # Alinha pelo centro vertical da linha de texto
             y_img = y_base + (6.5 - h) / 2
             x_img = pdf.get_x()
 
             pdf.image(tmp_path, x=x_img, y=y_img, h=h, w=w)
 
-            # Restaura exatamente a coordenada Y original da linha de texto
+            # Restaura Y exato e move X para após a imagem
             pdf.set_xy(x_img + w + 1.2, y_base)
     finally:
         os.unlink(tmp_path)
