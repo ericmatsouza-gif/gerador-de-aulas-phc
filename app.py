@@ -21,204 +21,275 @@ st.markdown("""
 
 # ── RENDERIZADOR ESTÁVEL ──────────────────────────────────────────────────────
 class PHCRenderer:
+    """
+    Renderizador de texto para PDF com suporte a:
+      - Negrito via **texto**
+      - Expoentes via ^n ou ^(expr)
+      - Frações via (num/den)
+      - Raízes via raiz(x) ou N√(x)
+      - Listas com -, *, •, 1., a)
+
+    Toda escrita usa set_xy() explícito, evitando sobreposição por
+    cursor interno desalinhado do fpdf.
+    """
+
     def __init__(self, pdf, font_name="DejaVu", base_size=10):
-        self.pdf = pdf
-        self.font_name = font_name
-        self.base_size = base_size
-        self.line_height = 7.0
-        self.bold = False
-        self.size_mult = 1.0
+        self.pdf        = pdf
+        self.font_name  = font_name
+        self.base_size  = base_size
+        self.line_height = 6.0
+
+        # Estado de renderização
+        self.bold        = False
+        self.size_mult   = 1.0
         self.in_exponent = False
-        
+
+        # Cursor explícito — sempre atualizado após cada escrita
+        self.x = 0.0
+        self.y = 0.0
+
+    # ── Utilitários internos ──────────────────────────────────────────────────
+
     def _apply_style(self):
         style = "B" if self.bold else ""
-        size = self.base_size * self.size_mult
+        size  = self.base_size * self.size_mult
         try:
             self.pdf.set_font(self.font_name, style, size)
-        except:
+        except Exception:
             self.pdf.set_font("helvetica", style, size)
 
-    def _write_at(self, x, y, text):
-    """Escreve texto em coordenada absoluta, retorna o X final."""
-    if not text: return x
-    self._apply_style()
-    if self.pdf.font_family.lower() == "helvetica":
-        text = text.encode('latin-1', 'replace').decode('latin-1')
-    self.pdf.set_xy(x, y)
-    self.pdf.write(self.line_height, text)
-    return self.pdf.get_x()
+    def _encode(self, text: str) -> str:
+        """Converte para latin-1 quando a fonte não suporta Unicode."""
+        if self.pdf.font_family.lower() == "helvetica":
+            return text.encode("latin-1", "replace").decode("latin-1")
+        return text
 
-def draw_fraction(self, num_text, den_text):
-    if self.in_exponent:
-        self.x = self._write_at(self.x, self.y, f"({num_text}/{den_text})")
-        return
-    
-    old_mult = self.size_mult
-    self.size_mult *= 0.85
-    self._apply_style()
-    
-    w_num = self.pdf.get_string_width(num_text)
-    w_den = self.pdf.get_string_width(den_text)
-    w_frac = max(w_num, w_den) + 4
-    half = self.line_height * 0.55
-    
-    # Numerador acima da linha base
-    self._write_at(self.x + (w_frac - w_num) / 2, self.y - half, num_text)
-    
-    # Linha separadora exatamente na linha base
-    self.pdf.set_draw_color(44, 62, 80)
-    self.pdf.set_line_width(0.2)
-    self.pdf.line(self.x, self.y + self.line_height / 2,
-                  self.x + w_frac, self.y + self.line_height / 2)
-    
-    # Denominador abaixo da linha base
-    self._write_at(self.x + (w_frac - w_den) / 2, self.y + half, den_text)
-    
-    # Avança o cursor X
-    self.x += w_frac + 1
-    self.size_mult = old_mult
-    self._apply_style()
+    def _char_width(self, text: str) -> float:
+        self._apply_style()
+        return self.pdf.get_string_width(text)
 
-    def render_span(self, text):
+    def _write_at(self, x: float, y: float, text: str) -> float:
+        """
+        Posiciona o cursor em (x, y) e escreve `text`.
+        Retorna o novo X após a escrita.
+        """
+        if not text:
+            return x
+        self._apply_style()
+        self.pdf.set_xy(x, y)
+        self.pdf.write(self.line_height, self._encode(text))
+        return self.pdf.get_x()
+
+    # ── Elementos matemáticos ─────────────────────────────────────────────────
+
+    def draw_fraction(self, num_text: str, den_text: str):
+        """Desenha uma fração vertical com linha separadora."""
+        if self.in_exponent:
+            # Dentro de expoente: representação inline simples
+            self.x = self._write_at(self.x, self.y, f"({num_text}/{den_text})")
+            return
+
+        old_mult = self.size_mult
+        self.size_mult *= 0.82
+        self._apply_style()
+
+        w_num  = self._char_width(num_text)
+        w_den  = self._char_width(den_text)
+        w_frac = max(w_num, w_den) + 4          # largura total da fração
+        half   = self.line_height * 0.60         # deslocamento vertical
+
+        x0 = self.x
+        y0 = self.y
+
+        # Numerador — acima da linha base
+        self._write_at(x0 + (w_frac - w_num) / 2, y0 - half, num_text)
+
+        # Linha separadora — exatamente na linha base
+        self.pdf.set_draw_color(44, 62, 80)
+        self.pdf.set_line_width(0.25)
+        self.pdf.line(x0, y0 + self.line_height / 2,
+                      x0 + w_frac, y0 + self.line_height / 2)
+
+        # Denominador — abaixo da linha base
+        self._write_at(x0 + (w_frac - w_den) / 2, y0 + half, den_text)
+
+        # Avança o cursor para depois da fração
+        self.x = x0 + w_frac + 1.5
+        self.size_mult = old_mult
+        self._apply_style()
+
+    def draw_exponent(self, content: str):
+        """Renderiza um expoente em superscript."""
+        old_mult = self.size_mult
+        old_exp  = self.in_exponent
+
+        self.size_mult  *= 0.70
+        self.in_exponent = True
+
+        # Eleva o cursor 2.5 pt acima da linha base
+        exp_y = self.y - 2.5
+        x_before = self.x
+
+        self._render_span_at(content, self.x, exp_y)
+
+        # Garante que o X avançou além do expoente
+        # (render_span_at atualiza self.x corretamente)
+        self.size_mult   = old_mult
+        self.in_exponent = old_exp
+        self._apply_style()
+
+    def draw_radical(self, content: str, index: str = ""):
+        """Desenha símbolo √ com vínculo (overline) sobre o conteúdo."""
+        y0 = self.y
+
+        # Índice da raiz (ex: ³√)
+        if index and index not in ("raiz", "√"):
+            old_mult = self.size_mult
+            self.size_mult *= 0.65
+            self._apply_style()
+            self.x = self._write_at(self.x, y0 - 1.5, index)
+            self.size_mult = old_mult
+            self._apply_style()
+
+        # Símbolo √
+        self.x = self._write_at(self.x, y0, "√")
+        x_after_sqrt = self.x
+
+        # Conteúdo dentro da raiz
+        self._render_span_at(content, self.x, y0)
+
+        # Vínculo horizontal sobre o conteúdo
+        line_y = y0 + 0.5
+        self.pdf.set_draw_color(44, 62, 80)
+        self.pdf.set_line_width(0.25)
+        self.pdf.line(x_after_sqrt, line_y, self.x, line_y)
+
+    # ── Motor de spans ────────────────────────────────────────────────────────
+
+    def _render_span_at(self, text: str, x: float, y: float):
+        """
+        Renderiza `text` a partir de (x, y), atualizando self.x conforme avança.
+        """
+        self.x = x
+        self.y = y
+        self._render_span_core(text)
+
+    def _render_span_core(self, text: str):
+        """
+        Percorre `text` caractere a caractere interpretando marcadores.
+        Usa e atualiza self.x / self.y durante toda a execução.
+        """
         i = 0
         while i < len(text):
+
+            # ── Negrito **...** ──────────────────────────────────────────────
             if text.startswith("**", i):
                 self.bold = not self.bold
                 i += 2
                 continue
-            
+
+            # ── Expoente ^n ou ^(expr) ───────────────────────────────────────
             if text[i] == "^":
                 i += 1
-                content = ""
                 if i < len(text) and text[i] == "(":
+                    # Conteúdo entre parênteses balanceados
                     i += 1
                     balance, start = 1, i
                     while i < len(text) and balance > 0:
-                        if text[i] == "(": balance += 1
+                        if   text[i] == "(": balance += 1
                         elif text[i] == ")": balance -= 1
                         if balance > 0: i += 1
-                    content, i = text[start:i], i + 1
-                else:
-                    start = i
-                    while i < len(text) and (text[i].isalnum() or text[i] in "+-"): i += 1
                     content = text[start:i]
-                
-                old_mult, old_exp = self.size_mult, self.in_exponent
-                self.size_mult *= 0.7
-                self.in_exponent = True
-                
-                # Salva a posição atual para retornar após o expoente
-                x_before_exp, y_before_exp = self.pdf.get_x(), self.pdf.get_y()
-                
-                # Move o cursor para cima para o expoente
-                self.pdf.set_y(y_before_exp - 2.5)
-                self.render_span(content)
-                
-                # Retorna o cursor para a linha base, mantendo o X avançado
-                self.pdf.set_xy(self.pdf.get_x(), y_before_exp)
-                
-                self.size_mult, self.in_exponent = old_mult, old_exp
+                    i += 1
+                else:
+                    # Conteúdo simples: dígitos/letras/sinal
+                    start = i
+                    while i < len(text) and (text[i].isalnum() or text[i] in "+-"):
+                        i += 1
+                    content = text[start:i]
+                self.draw_exponent(content)
                 continue
-            
+
+            # ── Fração (num/den) ─────────────────────────────────────────────
             if text[i] == "(":
                 balance, j, slash_pos = 1, i + 1, -1
                 while j < len(text) and balance > 0:
-                    if text[j] == "(": balance += 1
+                    if   text[j] == "(": balance += 1
                     elif text[j] == ")": balance -= 1
                     elif text[j] == "/" and balance == 1: slash_pos = j
                     if balance > 0: j += 1
                 if slash_pos != -1:
-                    num, den = text[i+1:slash_pos].strip(), text[slash_pos+1:j].strip()
+                    num = text[i + 1 : slash_pos].strip()
+                    den = text[slash_pos + 1 : j].strip()
                     self.draw_fraction(num, den)
                     i = j + 1
                     continue
-            
-            match_raiz = re.match(r'(?:raiz|\d*√)\((.*?)\)', text[i:])
+                # Não é fração — cai no caractere normal abaixo
+
+            # ── Raiz raiz(...) ou N√(...) ────────────────────────────────────
+            match_raiz = re.match(r'(raiz|\d*√)\(', text[i:])
             if match_raiz:
-                full_match = match_raiz.group(0)
-                content = match_raiz.group(1)
-                prefix = full_match.split('(')[0]
-                
-                x_start_radical, y_start_radical = self.pdf.get_x(), self.pdf.get_y()
-                
-                # Renderiza o índice da raiz se houver (ex: 3√)
-                if '√' in prefix and prefix != 'raiz':
-                    index_val = prefix.replace('√', '')
-                    old_mult = self.size_mult
-                    self.size_mult *= 0.7 # Tamanho menor para o índice
-                    
-                    # Move o cursor para cima para o índice
-                    self.pdf.set_y(y_start_radical - 1.5)
-                    self._write(index_val)
-                    self.pdf.set_y(y_start_radical) # Volta para a linha base
-                    
-                    self.size_mult = old_mult
-                    self._apply_style()
-                    
-                # Renderiza o símbolo da raiz
-                self._write('√')
-                
-                # Salva a posição X após o símbolo da raiz para desenhar o vínculo
-                x_after_radical_symbol = self.pdf.get_x()
-                
-                # Renderiza o conteúdo da raiz
-                self.render_span(content)
-                
-                # Desenha o vínculo (linha horizontal) sobre o conteúdo
-                self.pdf.set_draw_color(44, 62, 80)
-                self.pdf.set_line_width(0.2)
-                # A linha deve começar onde o símbolo da raiz termina e ir até o final do conteúdo
-                # Ajuste fino para alinhar com o topo do texto
-                line_y = y_start_radical + self.line_height / 2 - 1.5 
-                self.pdf.line(x_after_radical_symbol, line_y, self.pdf.get_x(), line_y)
-                
-                i += len(full_match)
+                prefix = match_raiz.group(1)          # "raiz", "√", "3√" …
+                i += len(match_raiz.group(0))          # avança além de "raiz(" ou "3√("
+                balance, start = 1, i
+                while i < len(text) and balance > 0:
+                    if   text[i] == "(": balance += 1
+                    elif text[i] == ")": balance -= 1
+                    if balance > 0: i += 1
+                content = text[start:i]
+                i += 1                                 # consome ")"
+
+                index = "" if prefix == "raiz" or prefix == "√" else prefix.replace("√", "")
+                self.draw_radical(content, index)
                 continue
-            
-            self._write(text[i])
+
+            # ── Caractere normal ─────────────────────────────────────────────
+            self.x = self._write_at(self.x, self.y, text[i])
             i += 1
 
-    def render_line(self, text):
+    def render_span(self, text: str):
+        """
+        Ponto de entrada público para renderizar inline a partir da
+        posição atual do cursor PDF.
+        """
+        self.x = self.pdf.get_x()
+        self.y = self.pdf.get_y()
+        self._render_span_core(text)
+        # Sincroniza o cursor do fpdf ao final
+        self.pdf.set_xy(self.x, self.y)
+
+    # ── Renderização de linha completa ────────────────────────────────────────
+
+    def render_line(self, text: str):
+        """
+        Renderiza uma linha de texto com suporte a listas e spans matemáticos.
+        Após a renderização avança para a próxima linha.
+        """
         if not text.strip():
             self.pdf.ln(self.line_height)
             return
-        
-        # Detecta marcadores de lista a), 1., - etc
+
+        # Detecta marcador de lista: -, *, •, 1., a)
         match_list = re.match(r'^(\s*)([-*•]|\d+\.|\w\))\s+', text)
         if match_list:
-            bullet = match_list.group(2)
+            bullet  = match_list.group(2)
+            indent  = len(match_list.group(1)) * 2 + 5
             content = text[len(match_list.group(0)):]
-            
-            # Salva a posição X e Y atual antes de qualquer alteração
-            x_before_bullet = self.pdf.get_x()
-            y_before_bullet = self.pdf.get_y()
 
-            # Define a posição para o bullet (com indentação)
-            self.pdf.set_x(self.pdf.l_margin + 5)
-            self._write(bullet + " ")
-            
-            # Salva a posição X após o bullet para o conteúdo
-            x_after_bullet = self.pdf.get_x()
-            
-            # Restaura o Y para a linha original antes de renderizar o conteúdo
-            self.pdf.set_y(y_before_bullet)
+            # Escreve o bullet com indentação
+            bx = self.pdf.l_margin + indent - 3
+            by = self.pdf.get_y()
+            self._write_at(bx, by, bullet + " ")
 
-            # Usa multi_cell para o conteúdo da lista, com recuo
-            # O multi_cell precisa do X inicial e Y inicial para calcular o fluxo
-            self.pdf.multi_cell(
-                w=self.pdf.epw - x_after_bullet + self.pdf.l_margin,
-                h=self.line_height,
-                text=content,
-                border=0,
-                align='L',
-                fill=False,
-                new_x=XPos.LEFT, 
-                new_y=YPos.NEXT
-            )
-            
+            # Conteúdo do item logo após o bullet
+            self.x = self.pdf.get_x()
+            self.y = by
+            self._render_span_core(content)
         else:
+            self.pdf.set_x(self.pdf.l_margin)
             self.render_span(text)
-            self.pdf.ln(self.line_height + 2)
+
+        self.pdf.set_xy(self.pdf.l_margin, self.y + self.line_height + 1.5)
 
 # --- UTILITÁRIOS ───────────────────────────────────────────────────────────────
 def _localizar_fontes_dejavu() -> str:
