@@ -53,25 +53,32 @@ FONT_DIR = _localizar_fontes_dejavu()
 # ── CODECOGS: LaTeX → PNG ─────────────────────────────────────────────────────
 CODECOGS_URL = "https://latex.codecogs.com/png.image?"
 
+def sanitizar_latex(expr: str) -> str:
+    """Ajusta o código LaTeX para garantir renderização perfeita no CodeCogs."""
+    expr = expr.strip()
+    # Se for apenas uma letra isolada (ex: x, a, b, c), força formatação limpa
+    if len(expr) == 1 and expr.isalpha():
+        return f"\\mathit{{{expr}}}"
+    return expr
 
-def latex_para_png(expr: str, dpi: int = 150) -> bytes | None:
-    """Baixa PNG da expressão LaTeX via Codecogs com DPI elevado para legibilidade."""
-    # Adiciona \dpi e limpa espaços extras na expressão
-    expr_limpa = expr.strip()
+def latex_para_png(expr: str, dpi: int = 180) -> bytes | None:
+    """Baixa PNG da expressão LaTeX via Codecogs com DPI alto."""
+    expr_limpa = sanitizar_latex(expr)
+    
+    # Força fundo transparente/branco e DPI alto para nitidez
     params = f"\\dpi{{{dpi}}}\\bg{{white}}{expr_limpa}"
+    url = CODECOGS_URL + requests.utils.quote(params)
+    
     try:
-        resp = requests.get(CODECOGS_URL + requests.utils.quote(params), timeout=8)
-        if resp.status_code == 200 and resp.content:
+        resp = requests.get(url, timeout=8)
+        if resp.status_code == 200 and resp.content and len(resp.content) > 100:
             return resp.content
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Erro ao baixar LaTeX ({expr}): {e}")
     return None
-
-
+    
 def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
-    """
-    Insere PNG LaTeX preservando a proporção de altura e escala adequada para frações.
-    """
+    """Insere o PNG do LaTeX com escala e baseline ajustados."""
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp.write(png_bytes)
         tmp_path = tmp.name
@@ -81,57 +88,58 @@ def inserir_imagem_latex(pdf: FPDF, png_bytes: bytes, is_display: bool):
         with PILImage.open(io.BytesIO(png_bytes)) as img:
             w_px, h_px = img.size
 
-        # Fator de conversão ajustado para DPI 150 (1px = 0.169mm)
-        px_to_mm = 0.169
+        # Fator de conversão para DPI 180
+        px_to_mm = 0.141
 
         if is_display:
-            h = min(h_px * px_to_mm, 15.0)
+            h = min(h_px * px_to_mm, 16.0)
             w = h * (w_px / h_px)
 
-            pdf.ln(6.5)
-            pdf.set_x(pdf.l_margin)
+            pdf.ln(5)
             x_centro = pdf.l_margin + (pdf.epw - w) / 2
             pdf.image(tmp_path, x=x_centro, y=pdf.get_y(), h=h, w=w)
-
-            pdf.set_y(pdf.get_y() + h + 3)
+            pdf.set_y(pdf.get_y() + h + 4)
             pdf.set_x(pdf.l_margin)
         else:
             y_base = pdf.get_y()
-            pdf.set_x(pdf.get_x() + 0.8)
-
-            # Para inline, calcula altura proporcional. Se tiver fração, h_px é maior.
-            h_calculado = h_px * px_to_mm
-            h = min(max(h_calculado, 3.8), 8.5)  # Permite até 8.5mm para acomodar frações legíveis
+            
+            # Ajusta altura inline: mínimo de 4mm e máximo de 8.5mm (para frações)
+            h_calc = h_px * px_to_mm
+            h = min(max(h_calc, 4.0), 8.5)
             w = h * (w_px / h_px)
 
-            # Se extrapolar a margem direita, realiza a quebra de linha
+            # Quebra de linha se a imagem estourar a margem direita
             if pdf.get_x() + w > pdf.w - pdf.r_margin:
-                pdf.ln(renderer.lh if 'renderer' in locals() else 6.5)
+                pdf.ln(6.5)
                 pdf.set_x(pdf.l_margin)
                 y_base = pdf.get_y()
 
+            # Alinhamento pelo centro da linha de texto (altura base ~6.5mm)
             y_img = y_base + (6.5 - h) / 2
             x_img = pdf.get_x()
 
             pdf.image(tmp_path, x=x_img, y=y_img, h=h, w=w)
             pdf.set_xy(x_img + w + 1.2, y_base)
     finally:
-        os.unlink(tmp_path)
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 # ── TOKENIZADOR ───────────────────────────────────────────────────────────────
 def tokenizar_linha(texto: str) -> list[dict]:
     """
     Divide uma linha em tokens (texto, display $$, inline $).
-    Protege expressões monetárias como R$, R\$, $R$ e números com $ no final.
+    Trata delimitadores brutos e limpa vazamentos de código LaTeX em texto plano.
     """
-    # 1. Normaliza e protege variações monetárias frequentes
+    # 1. Normalização de Moeda e Escapes
     texto_tratado = texto.replace("R\\$", "R$")
-    texto_tratado = re.sub(r'\$?\s*R\$\s*(\d+)', r'R$ \1', texto_tratado)  # Ex: $R$ 16,00$ -> R$ 16,00
-    texto_tratado = re.sub(r'(\d+[\d\.,]*)\$', r'\1', texto_tratado)       # Remove $ no final do valor (ex: 16,00$)
-    
-    # Substitui temporariamente "R$" por uma tag neutra para não acionar o parser de LaTeX
+    texto_tratado = re.sub(r'\$?\s*R\$\s*(\d+)', r'R$ \1', texto_tratado)
+    texto_tratado = re.sub(r'(\d+[\d\.,]*)\$', r'\1', texto_tratado)
+
     TAG_MOEDA = "___MOEDA_REAIS___"
     texto_seguro = texto_tratado.replace("R$", TAG_MOEDA)
+
+    # 2. Desvincula hífens/marcadores de lista grudados no LaTeX (ex: "-$x$" -> "- $x$")
+    texto_seguro = re.sub(r'(^|\s+)-\s*\$', r'\1- $', texto_seguro)
 
     tokens = []
     i = 0
@@ -146,7 +154,7 @@ def tokenizar_linha(texto: str) -> list[dict]:
                 buf = ""
             j = texto_seguro.find("$$", i + 2)
             if j != -1:
-                tokens.append({"tipo": "display", "conteudo": texto_seguro[i + 2:j]})
+                tokens.append({"tipo": "display", "conteudo": texto_seguro[i + 2:j].strip()})
                 i = j + 2
             else:
                 buf += texto_seguro[i]
@@ -155,28 +163,18 @@ def tokenizar_linha(texto: str) -> list[dict]:
 
         # ── Inline $...$ ─────────────────────────────────────────────────────
         if texto_seguro[i] == "$":
-            precedido = i > 0 and (texto_seguro[i - 1].isalpha() or texto_seguro[i - 1].isdigit())
-            seguido_valido = (i + 1 < n) and texto_seguro[i + 1] not in (" ", "\t", "")
-
-            if not precedido and seguido_valido:
-                j = i + 1
-                fechamento = -1
-                while j < n:
-                    if texto_seguro[j] == "$":
-                        prec_ok = texto_seguro[j - 1] != " "
-                        segu = texto_seguro[j + 1] if j + 1 < n else ""
-                        segu_ok = segu == "" or not segu.isalnum()
-                        if prec_ok and segu_ok:
-                            fechamento = j
-                            break
-                    j += 1
-
-                if fechamento != -1:
+            # Procura fechamento do cifrão
+            j = texto_seguro.find("$", i + 1)
+            if j != -1 and j > i + 1:
+                # Garante que não é um $$
+                if texto_seguro[j - 1] != "$" and (j + 1 >= n or texto_seguro[j + 1] != "$"):
                     if buf:
                         tokens.append({"tipo": "texto", "conteudo": buf.replace(TAG_MOEDA, "R$")})
                         buf = ""
-                    tokens.append({"tipo": "inline", "conteudo": texto_seguro[i + 1:fechamento]})
-                    i = fechamento + 1
+                    
+                    conteudo_inline = texto_seguro[i + 1:j].strip()
+                    tokens.append({"tipo": "inline", "conteudo": conteudo_inline})
+                    i = j + 1
                     continue
 
         buf += texto_seguro[i]
@@ -186,8 +184,6 @@ def tokenizar_linha(texto: str) -> list[dict]:
         tokens.append({"tipo": "texto", "conteudo": buf.replace(TAG_MOEDA, "R$")})
 
     return tokens
-
-
 
 
 # ── RENDERER DE TEXTO ─────────────────────────────────────────────────────────
@@ -434,17 +430,12 @@ def gerar_conteudo_phc(client, disciplina: str, ano_escolar: str,
 
 
 REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
-- NUNCA use blocos de código (triplas crases ```) para formatar texto, exemplos ou matemática.
-- NUNCA escreva notação matemática solta no texto como 3^0, 3^1, x^2. Use SEMPRE a notação LaTeX embutida: $3^0$, $3^1$, $x^2$.
-- NUNCA inclua hífens ou marcadores de lista DENTRO das expressões LaTeX (exemplo ERRADO: "- $x = 1$", exemplo CORRETO: "- $x = 1$").
-- Para exibições em listas ou passos organizados, use listas comuns do Markdown (com traço "-") e insira as variáveis/expressões em LaTeX. Exemplo:
-  - Instante $t = 0$: 1 pessoa original ($3^0$)
-  - Instante $t = 1$: 3 novas pessoas ($3^1$)
-- Use LaTeX inline ($...$) apenas para variáveis isoladas ou igualdades curtas (ex: $x$, $a = 1$, $x_1$).
-- Passo a passo de equações com frações (\\frac), raízes ou resoluções de problemas DEVEM ser obrigatoriamente formatados em bloco (display): $$expressão$$
-- NUNCA use o símbolo de cifrão $ para indicar moeda ou dinheiro. Escreva SEMPRE o valor em formato de texto simples (exemplo: R$ 16,00 ou R$ 8.450,00) e NUNCA envolva valores em Reais com cifrões de LaTeX ($R$ 16,00$, $16,00$ ou \$R\$).
-- Negrito para termos importantes: **termo**.
-- Texto corrido em português fora dos delimitadores matemáticos.
+- NUNCA escreva comandos LaTeX soltos no texto sem delimitadores. Tudo que for comando LaTeX (\Delta, \neq, \mathbb, \notin) DEVE estar OBRIGATORIAMENTE dentro de $...$ ou $$...$$.
+- NUNCA use o hífen ou marcador de lista colado na expressão LaTeX (Exemplo ERRADO: "-$x$". Exemplo CORRETO: "- $x$").
+- NUNCA use bloco de código (```).
+- Use LaTeX inline ($...$) apenas para variáveis isoladas, letras ou igualdades simples (ex: $x$, $a \neq 0$, $\Delta$).
+- Qualquer expressão com fração (\frac), raiz (\sqrt) ou passos de cálculo longos DEVE ser formatada em bloco (display): $$expressão$$.
+- NUNCA use o símbolo de cifrão $ para dinheiro. Escreva sempre como texto simples: R$ 16,00 ou R$ 8.450,00.
 """
     config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
     response = client.models.generate_content(
