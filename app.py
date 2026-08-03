@@ -50,7 +50,6 @@ def garantir_fontes_dejavu() -> str:
         "DejaVuSans-Oblique.ttf": "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/ttf/DejaVuSans-Oblique.ttf",
     }
 
-    # Verifica se já estão no sistema
     paths_sistema = [
         "/usr/share/fonts/truetype/dejavu/",
         "/usr/share/fonts/dejavu/",
@@ -62,7 +61,6 @@ def garantir_fontes_dejavu() -> str:
         ):
             return p
 
-    # Se não estiverem no sistema, baixa dinamicamente
     for nome, url in fontes.items():
         caminho_local = os.path.join(pasta_fontes, nome)
         if not os.path.isfile(caminho_local):
@@ -151,7 +149,11 @@ def tokenizar_linha(texto: str) -> list[dict]:
     n = len(texto)
 
     while i < n:
-        if texto.startswith("$$", i):             if buf:                 tokens.append({"tipo": "texto", "conteudo": buf})                 buf = ""             j = texto.find("$$", i + 2)
+        if texto.startswith("$$", i):
+            if buf:
+                tokens.append({"tipo": "texto", "conteudo": buf})
+                buf = ""
+            j = texto.find("$$", i + 2)
             if j != -1:
                 tokens.append({"tipo": "display", "conteudo": texto[i + 2 : j]})
                 i = j + 2
@@ -213,9 +215,7 @@ class TextRenderer:
             self.pdf.set_font("helvetica", style, self.base_size)
 
     def _encode(self, t: str) -> str:
-        # Substitui travessões por hífens por segurança adicional
         t = t.replace("—", "-").replace("–", "-")
-
         if self.pdf.font_family.lower() == "helvetica":
             return t.encode("latin-1", "replace").decode("latin-1")
         return t
@@ -453,104 +453,4 @@ REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
 - Use LaTeX ($...$) para QUALQUER variável, expressão, fórmula, igualdade ou notação de potência/radiciação no texto (ex: $t = 0$, $x$, $A = l^2$).
 - Expressões matemáticas em destaque (fórmulas, equações em bloco próprio): $$expressão$$ — exemplo: $$M = C \\cdot (1+i)^t$$
 - Use notação LaTeX padrão: \\frac{{num}}{{den}}, \\sqrt{{x}}, \\sqrt[3]{{x}}, x^{{2}}, \\cdot, \\pm, \\leq, \\geq
-- NUNCA coloque números isolados ou texto simples dentro de $ (escreva "3 voltas", "4 lados" normalmente como texto).
-- NÃO use $ para indicar moeda (escreva "reais", "R$" com espaço após o símbolo, ou "BRL").
-- Negrito para termos importantes: **termo**.
-- Texto corrido em português fora dos delimitadores matemáticos.
-"""
-    config = types.GenerateContentConfig(
-        max_output_tokens=8192, temperature=0.7
-    )
-    response = client.models.generate_content(
-        model="gemini-flash-latest", contents=prompt, config=config
-    )
-    return response.text
-
-
-# ── INTERFACE ─────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.image("[https://img.icons8.com/color/96/teacher.png](https://img.icons8.com/color/96/teacher.png)", width=70)
-    st.title("Sobre o Autor")
-    st.markdown("**Prof. Me. Eric Souza da Silva**")
-    st.caption("Licenciado em Matemática (UERJ), Mestre pelo PROFMAT/UERJ.")
-
-st.title("📚 Gerador de Aulas")
-st.markdown(
-    '<div class="author-card">'
-    '<div class="author-name">Prof. Me. Eric Souza da Silva</div>'
-    '<div class="author-desc">Perspectiva PHC e Hegemonia Gramsciana.</div>'
-    "</div>",
-    unsafe_allow_html=True,
-)
-
-api_key = os.getenv("GEMINI_API_KEY", "")
-if not api_key:
-    api_key = st.text_input("🔑 Chave API Gemini:", type="password")
-
-col_disc, col_ano = st.columns(2)
-with col_disc:
-    disciplina = st.text_input("Disciplina", placeholder="Ex: Matemática")
-with col_ano:
-    ano_escolar = st.text_input("Ano / Série", placeholder="Ex: 9º ano")
-
-assunto = st.text_input("Assunto", placeholder="Ex: Potenciação")
-codigo_bncc = st.text_input("🎯 BNCC (opcional)")
-
-for chave in ("conteudo_md", "ultima_disciplina", "ultimo_ano", "ultimo_assunto"):
-    if chave not in st.session_state:
-        st.session_state[chave] = None if chave == "conteudo_md" else ""
-
-if st.button("✨ Gerar Material Didático"):
-    if not api_key or not disciplina or not ano_escolar or not assunto:
-        st.warning("Preencha todos os campos obrigatórios.")
-    else:
-        try:
-            with st.spinner("🧠 Elaborando material (Gemini Flash)..."):
-                client = get_gemini_client(api_key)
-                st.session_state.conteudo_md = gerar_conteudo_phc(
-                    client, disciplina, ano_escolar, assunto, codigo_bncc
-                )
-                st.session_state.ultima_disciplina = disciplina
-                st.session_state.ultimo_ano = ano_escolar
-                st.session_state.ultimo_assunto = assunto
-            st.success("✅ Material gerado com sucesso!")
-        except APIError as e:
-            if "503" in str(e) or "unavailable" in str(e).lower():
-                st.error(
-                    "⚠️ Servidor ocupado. Tente novamente em alguns segundos."
-                )
-            else:
-                st.error(f"❌ Erro na API Gemini: {e}")
-        except Exception as e:
-            st.error(f"❌ Erro inesperado: {e}")
-
-if st.session_state.conteudo_md:
-    st.divider()
-    with st.expander("📄 Visualizar texto gerado", expanded=True):
-        st.markdown(st.session_state.conteudo_md)
-    st.divider()
-
-    if st.button("🖨️ Gerar PDF"):
-        with st.spinner(
-            "⚙️ Renderizando expressões matemáticas via Codecogs..."
-        ):
-            try:
-                pdf_bytes = compilar_pdf(
-                    st.session_state.conteudo_md,
-                    st.session_state.ultima_disciplina,
-                    st.session_state.ultimo_ano,
-                    st.session_state.ultimo_assunto,
-                )
-                st.download_button(
-                    label="⬇️ Baixar PDF",
-                    data=pdf_bytes,
-                    file_name=f"Aula_{st.session_state.ultimo_assunto.replace(' ', '_')}.pdf",
-                    mime="application/pdf",
-                )
-            except Exception as e:
-                st.error(f"❌ Erro ao gerar PDF: {e}")
-
-st.markdown(
-    '<div class="footer">© Prof. Eric Souza da Silva</div>',
-    unsafe_allow_html=True,
-)
+- NUNCA coloque
