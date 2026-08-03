@@ -428,7 +428,7 @@ REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
 """
     config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
     response = client.models.generate_content(
-        model="gemini-flash-latest", contents=prompt, config=config
+        model="gemini-3.5-flash-lite", contents=prompt, config=config
     )
     return response.text
 
