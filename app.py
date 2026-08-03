@@ -392,15 +392,42 @@ def get_gemini_client(api_key: str) -> genai.Client:
 def gerar_conteudo_phc(client, disciplina: str, ano_escolar: str,
                        assunto: str, codigo_bncc: str = "") -> str:
     bncc_str = f"com referência à BNCC: {codigo_bncc}" if codigo_bncc else ""
-    prompt = f"""Você é um professor de {disciplina} do {ano_escolar} seguindo a Pedagogia Histórico-Crítica (PHC).
+    prompt = f""" 
+    Você é um professor especialista em Didática sob o referencial da
+    PEDAGOGIA HISTÓRICO-CRÍTICA e da TEORIA GRAMSCIANA DA HEGEMONIA.
+ 
+    Elabore um material de aula completo e profundo para:
+    - Disciplina: {disciplina}
+    - Ano/Série: {ano_escolar}
+    - Conteúdo/Assunto: {assunto}
+    {bloco_bncc}
+ 
+    ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
+    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido
+       historicamente pela humanidade para responder a necessidades concretas de sobrevivência,
+       trabalho e organização social.
+    2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA
+       REALIDADE, capacitando os sujeitos (especialmente das classes populares) para o AUTOGOVERNO,
+       a interpretação da sociedade e a tomada de decisão autônoma.
+    3. Rompa com a dualidade do ensino: entregue RIGOR TÉCNICO-CIENTÍFICO unido à CONSCIÊNCIA CRÍTICA.
+ 
+    Siga ESTRITAMENTE a estrutura abaixo:
+ 
+    # 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO
+    - Apresente a origem social e a necessidade histórica deste conceito.
+    - Aponte a relevância para o mundo contemporâneo (trabalho, economia, política, cidadania).
+    - Definição rigorosa, formal e conceitual, com propriedades e leis.
+ 
+    # 2. EXERCÍCIOS DE FIXAÇÃO E DOMÍNIO CONCEITUAL
+    - Questões de aplicação rigorosa dos conceitos e fórmulas.
+ 
+    # 3. DESAFIOS DE LEITURA CRÍTICA E CONTRA-HEGEMONIA
+    - Questões contextualizadas em dados reais ou plausíveis da sociedade.
+    - Exija interpretação, argumentação e decisão crítica com base no conhecimento.
+ 
+    # 4. GABARITO COMENTADO E PEDAGÓGICO
+    - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
 
-Gere um plano de aula completo sobre "{assunto}" {bncc_str}.
-
-Estrutura obrigatória (use exatamente estes cabeçalhos):
-# 1. Prática Social
-# 2. Fixação
-# 3. Leitura Crítica
-# 4. Gabarito
 
 REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
 - NUNCA use blocos de código (triplas crases ```) para formatar texto, exemplos ou matemática.
