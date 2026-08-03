@@ -264,21 +264,23 @@ class PDFMaterial(FPDF):
             self.add_font("DejaVu", style="I", fname=os.path.join(FONT_DIR, "DejaVuSans-Oblique.ttf"))
 
     def header(self):
-        fonte = "DejaVu" if FONT_DIR else "helvetica"
-        self.set_font(fonte, "B", 12)
-        self.set_text_color(26, 42, 58)
-        self.cell(0, 10, "PLANO DE AULA E MATERIAL DIDÁTICO",
-                  align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        self.set_font(fonte, "B", 9)
-        self.set_text_color(41, 128, 185)
-        self.cell(0, 5,
-                  f"{self.disciplina.upper()} | {self.ano_escolar} | Assunto: {self.assunto}",
-                  align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        self.ln(2)
-        self.set_draw_color(41, 128, 185)
-        self.set_line_width(0.5)
-        self.line(15, self.get_y(), 195, self.get_y())
-        self.ln(5)
+        # Renderiza o cabeçalho APENAS se estiver na página 1
+        if self.page_no() == 1:
+            fonte = "DejaVu" if FONT_DIR else "helvetica"
+            self.set_font(fonte, "B", 12)
+            self.set_text_color(26, 42, 58)
+            self.cell(0, 10, "PLANO DE AULA E MATERIAL DIDÁTICO",
+                      align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.set_font(fonte, "B", 9)
+            self.set_text_color(41, 128, 185)
+            self.cell(0, 5,
+                      f"{self.disciplina.upper()} | {self.ano_escolar} | Assunto: {self.assunto}",
+                      align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            self.ln(2)
+            self.set_draw_color(41, 128, 185)
+            self.set_line_width(0.5)
+            self.line(15, self.get_y(), 195, self.get_y())
+            self.ln(5)
 
     def footer(self):
         self.set_y(-15)
@@ -286,99 +288,6 @@ class PDFMaterial(FPDF):
         self.set_font(fonte, "", 8)
         self.set_text_color(130, 130, 130)
         self.cell(0, 10, f"Página {self.page_no()}/{'{nb}'}", align="R")
-
-
-# ── COMPILADOR PDF ────────────────────────────────────────────────────────────
-def compilar_pdf(texto_md: str, disciplina: str,
-                 ano_escolar: str, assunto: str) -> bytes:
-    pdf = PDFMaterial(disciplina, ano_escolar, assunto)
-    pdf.alias_nb_pages()
-    pdf.set_margins(15, 20, 15)
-    pdf.set_auto_page_break(auto=True, margin=20)
-    pdf.add_page()
-
-    fonte    = "DejaVu" if FONT_DIR else "helvetica"
-    renderer = TextRenderer(pdf, font_name=fonte, base_size=10)
-    W        = pdf.epw
-
-    def set_fonte(bold=False, size=10):
-        try:
-            pdf.set_font(fonte, "B" if bold else "", size)
-        except Exception:
-            pdf.set_font("helvetica", "B" if bold else "", size)
-
-    for linha_raw in texto_md.split("\n"):
-        linha = linha_raw.rstrip()
-        s     = linha.strip()
-
-        if not s:
-            pdf.ln(3)
-            continue
-
-        # H1
-        if s.startswith("# "):
-            pdf.ln(4)
-            pdf.set_fill_color(41, 128, 185)
-            set_fonte(bold=True, size=11)
-            pdf.set_text_color(255, 255, 255)
-            pdf.cell(W, 8, f"  {s[2:]}", fill=True,
-                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.set_text_color(44, 62, 80)
-            pdf.ln(3)
-            continue
-
-        # H2
-        if s.startswith("## "):
-            pdf.ln(3)
-            set_fonte(bold=True, size=10.5)
-            pdf.set_text_color(26, 42, 58)
-            pdf.cell(W, 7, s[3:], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.set_draw_color(41, 128, 185)
-            pdf.line(15, pdf.get_y(), 195, pdf.get_y())
-            pdf.ln(2)
-            continue
-
-        # H3/H4
-        if re.match(r'^#{3,4}\s+', s):
-            conteudo = re.sub(r'^#{3,4}\s+', '', s)
-            pdf.ln(2)
-            set_fonte(bold=True, size=10)
-            pdf.set_text_color(44, 62, 80)
-            pdf.cell(W, 6, conteudo, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.ln(1)
-            continue
-
-        # Separador ---
-        if re.match(r'^-{3,}$', s):
-            pdf.ln(2)
-            pdf.set_draw_color(200, 200, 200)
-            pdf.line(15, pdf.get_y(), 195, pdf.get_y())
-            pdf.ln(2)
-            continue
-
-        # Lista: -, *, •, 1., a)
-        match_list = re.match(r'^(\s*)([-•]|\d+\.|\w\))\s+', linha)
-        if match_list:
-            bullet   = match_list.group(2)
-            indent   = len(match_list.group(1)) * 2 + 5
-            conteudo = linha[len(match_list.group(0)):]
-            pdf.set_x(pdf.l_margin + indent - 3)
-            set_fonte(bold=False, size=10)
-            pdf.set_text_color(44, 62, 80)
-            pdf.write(renderer.lh, bullet + " ")
-            _renderizar_tokens(pdf, renderer, conteudo)
-            pdf.ln(renderer.lh + 1)
-            continue
-
-        # Linha normal
-        pdf.set_x(pdf.l_margin)
-        pdf.set_text_color(44, 62, 80)
-        set_fonte(bold=False, size=10)
-        _renderizar_tokens(pdf, renderer, s)
-        pdf.ln(renderer.lh + 1)
-
-    return bytes(pdf.output())
-
 
 # ── GEMINI ────────────────────────────────────────────────────────────────────
 @st.cache_resource
