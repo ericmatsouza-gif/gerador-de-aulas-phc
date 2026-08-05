@@ -1,4 +1,5 @@
-streamlit
+streamlit==1.38.0
 google-genai
 fpdf2
 Pillow
+starlette==0.40.0
