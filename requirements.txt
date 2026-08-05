@@ -1,5 +1,4 @@
 streamlit==1.38.0
-google-genai
-fpdf2
-Pillow
-starlette==0.40.0
+google-genai==1.30.0
+fpdf2==2.8.4
+Pillow==11.3.0
