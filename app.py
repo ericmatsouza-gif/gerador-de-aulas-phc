@@ -351,7 +351,7 @@ def compilar_pdf(texto_md: str, disciplina: str,
             conteudo = re.sub(r'^#{3,4}\s+', '', s)
             pdf.ln(2)
             set_fonte(bold=True, size=10)
-            pdf.set_text_color(44, 62, 80)
+            pdf.set_text_color(44, 62, 80)números inteiros
             pdf.cell(W, 6, conteudo, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(1)
             continue
@@ -406,11 +406,36 @@ NÍVEL DE DIFICULDADE DO MATERIAL: {nivel_dificuldade.upper()}
 - Ajuste a profundidade dos conceitos, a complexidade dos problemas e a linguagem pedagógica para o nível {nivel_dificuldade}.
 - Se {nivel_dificuldade} == Prefeitura Municipal de Casimiro de Abreu: o nível é abaixo do básico.
 
-Estrutura obrigatória (use exatamente estes cabeçalhos):
-# 1. Prática Social
-# 2. Fixação
-# 3. Leitura Crítica
-# 4. Gabarito
+ORIENTAÇÃO PEDAGÓGICO-POLÍTICA OBRIGATÓRIA:
+    1. O conhecimento científico/escolar deve ser tratado como um saber sistematizado, produzido
+       historicamente pela humanidade para responder a necessidades concretas de sobrevivência,
+       trabalho e organização social.
+    2. A propriedade dos conceitos deve ser apresentada como ferramenta de LEITURA CRÍTICA DA
+       REALIDADE, capacitando os sujeitos (especialmente das classes populares) para o AUTOGOVERNO,
+       a interpretação da sociedade e a tomada de decisão autônoma.
+    3. Rompa com a dualidade do ensino: entregue RIGOR TÉCNICO-CIENTÍFICO unido à CONSCIÊNCIA CRÍTICA.
+    4. Se {nivel_dificuldade} == 'Prefeitura Municipal de Casimiro de Abreu':
+        Ajuste o nível de maneira que os estudantes possuam muita dificuldade para {ano_escolar}, 
+        pois se trata de um contexto de escola pública do interior do Rio de Janeiro, com salas de aula super lotadas e estudantes com
+        pouco interesse e um contexto familiar delicado.
+
+    Siga ESTRITAMENTE a estrutura abaixo:
+
+    # 1. PRÁTICA SOCIAL E GÊNESE HISTÓRICA DO CONTEÚDO
+    - Apresente a origem social e a necessidade histórica deste conceito.
+    - Aponte a relevância para o mundo contemporâneo (trabalho, economia, política, cidadania).
+    - Definição rigorosa, formal e conceitual, com propriedades e leis.
+
+    # 2. EXERCÍCIOS DE FIXAÇÃO E DOMÍNIO CONCEITUAL
+    - Questões de aplicação rigorosa dos conceitos e fórmulas.
+
+    # 3. DESAFIOS DE LEITURA CRÍTICA E CONTRA-HEGEMONIA
+    - Questões contextualizadas em dados reais ou plausíveis da sociedade.
+    - Exija interpretação, argumentação e decisão crítica com base no conhecimento.
+
+    # 4. GABARITO COMENTADO E PEDAGÓGICO
+    - Resolução passo a passo com justificativa técnica e reflexão pedagógica.
+
 
 REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
 - NUNCA deixe explicito, a palavra 'autogoverno', 'pedagogia histórico-crítica' e 'escola pública'
