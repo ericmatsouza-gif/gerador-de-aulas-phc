@@ -351,7 +351,7 @@ def compilar_pdf(texto_md: str, disciplina: str,
             conteudo = re.sub(r'^#{3,4}\s+', '', s)
             pdf.ln(2)
             set_fonte(bold=True, size=10)
-            pdf.set_text_color(44, 62, 80)números inteiros
+            pdf.set_text_color(44, 62, 80)
             pdf.cell(W, 6, conteudo, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(1)
             continue
