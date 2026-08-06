@@ -413,6 +413,7 @@ Estrutura obrigatória (use exatamente estes cabeçalhos):
 # 4. Gabarito
 
 REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
+- NUNCA deixe explicito, através de explicações a ideia do 'autogoverno' e da 'pedagogia histórico-crítica'
 - NUNCA use blocos de código (triplas crases ```) para formatar texto, exemplos ou matemática.
 - NUNCA escreva notação matemática solta no texto como 3^0, 3^1, x^2. Use SEMPRE a notação LaTeX embutida: $3^0$, $3^1$, $x^2$.
 - Para exibições em listas ou passos organizados, use listas comuns do Markdown (com traço "-") e insira as variáveis/expressões em LaTeX. Exemplo:
