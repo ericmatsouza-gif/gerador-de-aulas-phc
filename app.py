@@ -12,6 +12,7 @@ from fpdf import FPDF, XPos, YPos
 
 # ── CONFIGURAÇÃO DA PÁGINA ────────────────────────────────────────────────────
 st.set_page_config(page_title="Gerador de Aulas", page_icon="📚", layout="centered")
+
 st.markdown("""
 <style>
 
@@ -73,9 +74,9 @@ section[data-testid="stSidebar"] {
     max-width: 320px !important;
 }
 
-/* ===== ESPAÇO NO TOPO ===== */
-section[data-testid="stSidebar"] h1:first-of-type 
-{ margin-top: -5rem !important;
+/* ===== ESPAÇO NO TOPO DA SIDEBAR ===== */
+section[data-testid="stSidebar"] > div:first-child {
+    padding-top: 2rem;
 }
 
 /* ===== NOME DO AUTOR ===== */
@@ -83,13 +84,6 @@ section[data-testid="stSidebar"] h1:first-of-type
     margin-top: -0.8rem;
 }
 
-/* ===== CONTROLE DA SIDEBAR ===== */
-
-/* Quando aberta, esconde o botão "»" */
-.stApp:has(.stSidebar[aria-expanded="true"])
-[data-testid="stSidebarCollapsedControl"] {
-    display: none !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
