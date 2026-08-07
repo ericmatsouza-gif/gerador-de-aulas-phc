@@ -63,20 +63,16 @@ st.markdown("""
 }
 /* ===== LARGURA DA SIDEBAR ===== */
 section[data-testid="stSidebar"] {
-    width: 320px !important;
+    min-width: 320px !important;
+    max-width: 320px !important;
 }
 
-/* ===== REDUZ ESPAÇO NO TOPO ===== */
+/* ===== ESPAÇO NO TOPO ===== */
 section[data-testid="stSidebar"] .block-container {
     padding-top: 0 !important;
 }
 
-/* ===== SOBE O "SOBRE O AUTOR" ===== */
-section[data-testid="stSidebar"] h1:first-of-type {
-    margin-top: -5rem !important;
-}
-
-/* ===== AJUSTE DO CONTEÚDO APÓS "SOBRE O AUTOR" ===== */
+/* ===== CONTEÚDO APÓS "SOBRE O AUTOR" ===== */
 .author-name-sidebar {
     margin-top: -2rem;
 }
