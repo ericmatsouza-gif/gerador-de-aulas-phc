@@ -66,10 +66,6 @@ section[data-testid="stSidebar"] {
     width: 320px !important;
 }
 
-section[data-testid="stSidebar"] > div {
-    width: 320px !important;
-}
-
 /* ===== REDUZ ESPAÇO NO TOPO ===== */
 section[data-testid="stSidebar"] .block-container {
     padding-top: 0 !important;
