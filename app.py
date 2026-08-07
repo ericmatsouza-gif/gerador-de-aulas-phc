@@ -74,8 +74,8 @@ section[data-testid="stSidebar"] {
 }
 
 /* ===== ESPAÇO NO TOPO ===== */
-section[data-testid="stSidebar"] .block-container {
-    padding-top: -2 !important;
+section[data-testid="stSidebar"] h1:first-of-type 
+{ margin-top: -5rem !important;
 }
 
 /* ===== NOME DO AUTOR ===== */
