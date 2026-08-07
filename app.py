@@ -88,7 +88,6 @@ section[data-testid="stSidebar"] .block-container {
 </style>
 """, unsafe_allow_html=True)
 
-
 # ── LOCALIZAÇÃO DE FONTES DejaVu ──────────────────────────────────────────────
 def _localizar_fontes_dejavu() -> str:
     paths = [
