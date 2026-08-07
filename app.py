@@ -100,6 +100,7 @@ div[data-testid="stSidebarHeader"] {
 </style>
 """, unsafe_allow_html=True)
 
+
 # ── LOCALIZAÇÃO DE FONTES DejaVu ──────────────────────────────────────────────
 def _localizar_fontes_dejavu() -> str:
     paths = [
@@ -463,12 +464,10 @@ REGRAS_FORMATACAO = """
 REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
 - NUNCA use blocos de código (triplas crases ```) para formatar texto, exemplos ou matemática.
 - NUNCA escreva notação matemática solta no texto como 3^0, 3^1, x^2. Use SEMPRE a notação LaTeX embutida: $3^0$, $3^1$, $x^2$.
-- Para exibições em listas ou passos organizados, use listas comuns do Markdown (com traço "-") e insira as variáveis/expressões em LaTeX. Exemplo:
-  - Instante $t = 0$: 1 pessoa original ($3^0$)
-  - Instante $t = 1$: 3 novas pessoas ($3^1$)
-- Use LaTeX ($...$) para QUALQUER variável, expressão, fórmula, igualdade ou notação de potência/radiciação no texto (ex: $t = 0$, $x$, $A = l^2$).
-- Expressões matemáticas em destaque (fórmulas, equações em bloco próprio): $$expressão$$ — exemplo: $$M = C \\cdot (1+i)^t$$
-- Use notação LaTeX padrão: \\frac{{num}}{{den}}, \\sqrt{{x}}, \\sqrt[3]{{x}}, x^{{2}}, \\cdot, \\pm, \\leq, \\geq
+- Para exibições em listas ou passos organizados, use listas comuns do Markdown (com traço "-") e insira as variáveis/expressões em LaTeX.
+- Use LaTeX ($...$) para QUALQUER variável, expressão, fórmula, igualdade ou notação de potência/radiciação no texto.
+- Expressões matemáticas em destaque (fórmulas, equações em bloco próprio): $$expressão$$
+- Use notação LaTeX padrão: \\frac{num}{den}, \\sqrt{x}, \\sqrt[3]{x}, x^{2}, \\cdot, \\pm, \\leq, \\geq
 - NUNCA coloque números isolados ou texto simples dentro de $ (escreva "3 voltas", "4 lados" normalmente como texto).
 - NÃO use $ para indicar moeda (escreva "reais", "R$" com espaço após o símbolo, ou "BRL").
 - Negrito para termos importantes: **termo**.
@@ -527,17 +526,104 @@ def gerar_conteudo_phc(client, disciplina: str, ano_escolar: str,
     """
     config = types.GenerateContentConfig(max_output_tokens=8192, temperature=0.7)
     response = client.models.generate_content(
-        model="gemini-flash-latest", contents=prompt, config=config
+        model="gemini-3.5-flash-lite", contents=prompt, config=config
     )
     return response.text
+
+
+def _detectar_conteudos(assunto: str) -> list[str]:
+    """
+    Divide o campo assunto em lista de conteúdos individuais.
+
+    Separadores aceitos:
+      - Vírgula: sempre separa conteúdos.
+      - Ponto-e-vírgula: sempre separa conteúdos.
+      - Traço ' - ': separa APENAS quando o trecho à esquerda do traço
+        já contém outro separador (vírgula/ponto-e-vírgula) anteriormente
+        na string, ou seja, é usado como separador de lista e não como
+        parte de um nome composto (ex: "Números Inteiros - Ordenação").
+
+    Estratégia: divide primeiro por vírgula e ponto-e-vírgula; em seguida,
+    aplica a quebra por ' - ' apenas em itens que o usuário claramente usou
+    como separador de lista (heurística: o item inteiro tem mais de 4 palavras
+    E contém ' - ' mais de uma vez, indicando lista encadeada).
+    """
+    # Passo 1: divide por vírgula e ponto-e-vírgula
+    normalizado = re.sub(r'\s*;\s*', ',', assunto)
+    partes_brutas = [p.strip() for p in normalizado.split(',') if p.strip()]
+
+    # Passo 2: para cada parte, decide se ' - ' é separador de lista ou nome composto.
+    # Critério: se a parte contém ' - ' mais de uma vez, provavelmente é uma lista
+    # encadeada; se contém exatamente uma vez, provavelmente é nome composto.
+    conteudos = []
+    for parte in partes_brutas:
+        ocorrencias = len(re.findall(r'\s+-\s+', parte))
+        if ocorrencias > 1:
+            # Lista encadeada: quebra em todos os ' - '
+            sub = [s.strip() for s in re.split(r'\s+-\s+', parte) if s.strip()]
+            conteudos.extend(sub)
+        else:
+            # Nome composto ou separador único: mantém como está
+            conteudos.append(parte)
+
+    return conteudos if conteudos else [assunto.strip()]
+
+
+def _distribuir_exercicios(conteudos: list[str], quantidade: int) -> list[tuple[str, int]]:
+    """
+    Distribui `quantidade` exercícios proporcionalmente entre os conteúdos.
+    Garante que a soma seja exatamente `quantidade`, jogando o resto no último item.
+    Retorna lista de (conteudo, n_exercicios).
+    """
+    n = len(conteudos)
+    base = quantidade // n
+    resto = quantidade % n
+    distribuicao = []
+    for i, conteudo in enumerate(conteudos):
+        qtd = base + (1 if i < resto else 0)
+        distribuicao.append((conteudo, qtd))
+    return distribuicao
 
 
 def gerar_exercicios_phc(client, disciplina: str, ano_escolar: str, assunto: str,
                           nivel_dificuldade: str, quantidade: int,
                           tipos: list[str], codigo_bncc: str = "") -> str:
-    """Gera lista de exercícios + gabarito comentado em uma única chamada."""
+    """Gera lista de exercícios + gabarito comentado em uma única chamada.
+    Suporta múltiplos conteúdos no campo assunto, separados por vírgula,
+    ponto-e-vírgula ou ' - ', distribuindo os exercícios proporcionalmente.
+    """
 
-    # Monta a instrução de tipos
+    # ── Detecta e distribui conteúdos ────────────────────────────────────────
+    conteudos = _detectar_conteudos(assunto)
+    distribuicao = _distribuir_exercicios(conteudos, quantidade)
+    multiplos_conteudos = len(conteudos) > 1
+
+    # Monta bloco de distribuição para o prompt
+    if multiplos_conteudos:
+        linhas_dist = "\n".join(
+            f"    - {nome}: {qtd} exercício{'s' if qtd != 1 else ''}"
+            for nome, qtd in distribuicao
+        )
+        instrucao_conteudos = f"""
+    CONTEÚDOS IDENTIFICADOS ({len(conteudos)} no total):
+{linhas_dist}
+
+    REGRA DE DISTRIBUIÇÃO OBRIGATÓRIA:
+    - Gere EXATAMENTE o número de exercícios indicado para cada conteúdo acima.
+    - Antes do enunciado de cada exercício, identifique o conteúdo com a tag:
+      [Conteúdo: Nome do Conteúdo]
+    - Exercícios de um mesmo conteúdo devem aparecer agrupados na lista.
+    - A soma total deve ser exatamente {quantidade} exercícios.
+"""
+        titulo_lista = f"{disciplina} | {ano_escolar} | Conteúdos Diversos"
+    else:
+        instrucao_conteudos = f"""
+    CONTEÚDO: {assunto}
+    QUANTIDADE TOTAL: {quantidade} exercícios sobre este conteúdo.
+"""
+        titulo_lista = f"{disciplina} | {ano_escolar} | {assunto}"
+
+    # ── Monta instrução de tipos ──────────────────────────────────────────────
     mapa_tipos = {
         "Dissertativos / resolução passo a passo": "dissertativos (resolução passo a passo)",
         "Múltipla escolha": "múltipla escolha (4 alternativas, A a D)",
@@ -554,43 +640,34 @@ def gerar_exercicios_phc(client, disciplina: str, ano_escolar: str, assunto: str
     Elabore uma lista de exercícios para:
     - Disciplina: {disciplina}
     - Ano/Série: {ano_escolar}
-    - Conteúdo/Assunto: {assunto}
     {f"- BNCC: {codigo_bncc}" if codigo_bncc else ""}
     - Nível de dificuldade: {nivel_dificuldade}
         - Se {nivel_dificuldade} == 'Prefeitura Municipal de Casimiro de Abreu': nível abaixo do básico, contexto de escola pública do interior do RJ, salas lotadas, estudantes com dificuldades e contexto familiar delicado.
 
-    QUANTIDADE TOTAL: {quantidade} exercícios.
+    {instrucao_conteudos}
+
     TIPOS DE EXERCÍCIOS A USAR: {tipos_str}.
-    - Distribua os {quantidade} exercícios entre os tipos solicitados de forma equilibrada.
+    - Distribua os exercícios entre os tipos solicitados de forma equilibrada dentro de cada conteúdo.
     - Para múltipla escolha: apresente as alternativas A), B), C), D) em linhas separadas.
-    - Para verdadeiro ou falso: apresente a afirmação e deixe espaço para o aluno responder.
+    - Para verdadeiro ou falso: apresente a afirmação e deixe espaço para o aluno responder (  (  ) Verdadeiro   (  ) Falso).
     - Para dissertativos: enuncie claramente o problema, com dados e o que se pede.
 
     {ORIENTACAO_PHC}
 
     PERSPECTIVA DOS EXERCÍCIOS:
     - Pelo menos 90% dos exercícios devem contextualizar o conteúdo em situações reais da vida
-      das classes populares (trabalho, salário, consumo, saúde, território, política, ambiente 
-      e questionamento reais contra o capitalismo).
+      das classes populares (trabalho, salário, consumo, saúde, território, política, ambiente
+      e questionamento real contra o capitalismo).
     - Os demais podem ser de fixação direta do conteúdo, mas sempre com rigor conceitual.
     - Em nenhum exercício o conhecimento deve parecer neutro ou descolado da realidade social.
 
     Siga ESTRITAMENTE a estrutura abaixo:
 
     # LISTA DE EXERCÍCIOS
-    ## {disciplina} | {ano_escolar} | {assunto}REGRAS RIGOROSAS DE FORMATAÇÃO (PROIBIÇÕES E OBRIGAÇÕES):
-- NUNCA use blocos de código (triplas crases ```) para formatar texto, exemplos ou matemática.
-- NUNCA escreva notação matemática solta no texto como 3^0, 3^1, x^2. Use SEMPRE a notação LaTeX embutida: $3^0$, $3^1$, $x^2$.
-- Para exibições em listas ou passos organizados, use listas comuns do Markdown (com traço "-") e insira as variáveis/expressões em LaTeX.
-- Use LaTeX ($...$) para QUALQUER variável, expressão, fórmula, igualdade ou notação de potência/radiciação no texto.
-- Expressões matemáticas em destaque (fórmulas, equações em bloco próprio): $$expressão$$
-- Use notação LaTeX padrão: \\frac{num}{den}, \\sqrt{x}, \\sqrt[3]{x}, x^{2}, \\cdot, \\pm, \\leq, \\geq
-- NUNCA coloque números isolados ou texto simples dentro de $ (escreva "3 voltas", "4 lados" normalmente como texto).
-- NÃO use $ para indicar moeda (escreva "reais", "R$" com espaço após o símbolo, ou "BRL").
-- Negrito para termos importantes: **termo**.
-- Texto corrido em português fora dos delimitadores matemáticos.
+    ## {titulo_lista}
 
-    [Enumere os exercícios de 1 a {quantidade}. Use "**Exercício N.**" como marcador de cada questão.]
+    [Enumere os exercícios de 1 a {quantidade}. Use "**Exercício N.**" como marcador de cada questão.
+     Se houver múltiplos conteúdos, inclua a tag [Conteúdo: ...] antes do enunciado de cada exercício.]
 
     # GABARITO COMENTADO
     [Para cada exercício, apresente:]
@@ -713,7 +790,7 @@ with aba_aula:
             st.warning("Preencha todos os campos obrigatórios.")
         else:
             try:
-                with st.spinner("🧠 Elaborando material (Gemini Flash)..."):
+                with st.spinner("🧠 Elaborando material..."):
                     client = get_gemini_client(api_key)
                     st.session_state.conteudo_md = gerar_conteudo_phc(
                         client=client,
@@ -805,7 +882,7 @@ with aba_exercicios:
             st.warning("Selecione ao menos um tipo de exercício.")
         else:
             try:
-                with st.spinner(f"🧠 Gerando {ex_quantidade} exercícios (Gemini Flash)..."):
+                with st.spinner(f"🧠 Gerando {ex_quantidade} exercícios..."):
                     client = get_gemini_client(api_key)
                     st.session_state.exercicios_md = gerar_exercicios_phc(
                         client=client,
