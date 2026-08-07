@@ -73,18 +73,23 @@ section[data-testid="stSidebar"] {
     max-width: 320px !important;
 }
 
-
 /* ===== ESPAÇO NO TOPO ===== */
 section[data-testid="stSidebar"] .block-container {
     padding-top: 0 !important;
 }
-
 
 /* ===== NOME DO AUTOR ===== */
 .author-name-sidebar {
     margin-top: -0.8rem;
 }
 
+/* ===== CONTROLE DA SIDEBAR ===== */
+
+/* Quando aberta, esconde o botão "»" */
+.stApp:has(.stSidebar[aria-expanded="true"])
+[data-testid="stSidebarCollapsedControl"] {
+    display: none !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
