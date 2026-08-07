@@ -69,7 +69,7 @@ section[data-testid="stSidebar"] {
 
 /* ===== ESPAÇO NO TOPO ===== */
 section[data-testid="stSidebar"] .block-container {
-    padding-top: -5rem !important;
+    padding-top: -10 !important;
 }
 
 /* ===== CONTEÚDO APÓS "SOBRE O AUTOR" ===== */
@@ -77,6 +77,11 @@ section[data-testid="stSidebar"] .block-container {
     margin-top: -2rem;
 }
 
+/* ===== ESCONDE O BOTÃO "ABRIR" ENQUANTO A SIDEBAR ESTÁ ABERTA ===== */
+.stApp:has(section[data-testid="stSidebar"][aria-expanded="true"])
+[data-testid="stSidebarCollapsedControl"] {
+    display: none !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
