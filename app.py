@@ -69,7 +69,7 @@ section[data-testid="stSidebar"] {
 
 /* ===== ESPAÇO NO TOPO ===== */
 section[data-testid="stSidebar"] .block-container {
-    padding-top: -5 !important;
+    padding-top: -5rem !important;
 }
 
 /* ===== CONTEÚDO APÓS "SOBRE O AUTOR" ===== */
