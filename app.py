@@ -74,14 +74,22 @@ section[data-testid="stSidebar"] {
     max-width: 320px !important;
 }
 
-/* ===== ESPAÇO NO TOPO (MANTÉM ALTURA EXACTA SEM BLOQUEAR CLIQUE) ===== */
-section[data-testid="stSidebar"] h1:first-of-type {
-    margin-top: -5rem !important;
-    pointer-events: none; /* Deixa o clique do mouse passar direto para o botão << atrás/abaixo dele */
+/* ===== AJUSTE DE ALTURA DO TOPO (SEM BLOQUEAR O BOTÃO <<) ===== */
+/* Puxa o conteúdo para cima via container e descola do botão nativo */
+div[data-testid="stSidebarUserContent"] {
+    padding-top: 1rem !important;
 }
 
-section[data-testid="stSidebar"] h1:first-of-type * {
-    pointer-events: auto; /* Garante que o texto em si ainda seja selecionável se necessário */
+section[data-testid="stSidebar"] h1:first-of-type {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+}
+
+/* Garante que o botão << fique na camada superior para receber o clique */
+button[data-testid="stSidebarCollapseButton"],
+div[data-testid="stSidebarHeader"] {
+    z-index: 999999 !important;
+    position: relative !important;
 }
 
 /* ===== NOME DO AUTOR ===== */
