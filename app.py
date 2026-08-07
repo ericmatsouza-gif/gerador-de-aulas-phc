@@ -12,10 +12,10 @@ from fpdf import FPDF, XPos, YPos
 
 # ── CONFIGURAÇÃO DA PÁGINA ────────────────────────────────────────────────────
 st.set_page_config(page_title="Gerador de Aulas", page_icon="📚", layout="centered")
-
 st.markdown("""
 <style>
 
+/* ===== BOTÕES ===== */
 .stButton>button {
     width: 100%;
     background-color: #2980b9;
@@ -32,6 +32,8 @@ st.markdown("""
     color: white;
 }
 
+
+/* ===== CARD DO AUTOR ===== */
 .author-card {
     background-color: #f8f9fa;
     border-left: 4px solid #2980b9;
@@ -53,6 +55,8 @@ st.markdown("""
     margin-bottom: 10px;
 }
 
+
+/* ===== RODAPÉ ===== */
 .footer {
     margin-top: 50px;
     padding-top: 20px;
@@ -61,27 +65,26 @@ st.markdown("""
     font-size: 0.85rem;
     color: #7f8c8d;
 }
+
+
 /* ===== LARGURA DA SIDEBAR ===== */
 section[data-testid="stSidebar"] {
     min-width: 320px !important;
     max-width: 320px !important;
 }
 
+
 /* ===== ESPAÇO NO TOPO ===== */
 section[data-testid="stSidebar"] .block-container {
-    padding-top: -0 !important;
+    padding-top: 0 !important;
 }
 
-/* ===== CONTEÚDO APÓS "SOBRE O AUTOR" ===== */
+
+/* ===== NOME DO AUTOR ===== */
 .author-name-sidebar {
     margin-top: -0.8rem;
 }
 
-/* ===== ESCONDE O BOTÃO "ABRIR" ENQUANTO A SIDEBAR ESTÁ ABERTA ===== */
-.stApp:has(section[data-testid="stSidebar"][aria-expanded="true"])
-[data-testid="stSidebarCollapsedControl"] {
-    display: none !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
