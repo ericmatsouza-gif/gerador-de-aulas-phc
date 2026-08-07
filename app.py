@@ -13,6 +13,13 @@ from fpdf import FPDF, XPos, YPos
 # ── CONFIGURAÇÃO DA PÁGINA ────────────────────────────────────────────────────
 st.set_page_config(page_title="Gerador de Aulas", page_icon="📚", layout="centered")
 
+O problema ocorreu porque alteramos a regra do espaçamento superior no topo da sidebar. Para manter exatamente a mesma posição vertical original e fazer o botão << funcionar, mantenha o seu código original intacto e substitua apenas a parte do botão por uma ponte CSS que permite o clique no botão << enquanto esconde o controle da página principal.
+
+Use esta versão com todo o CSS original preservado:
+Python
+
+import streamlit as st
+
 st.markdown("""
 <style>
 
@@ -74,14 +81,23 @@ section[data-testid="stSidebar"] {
     max-width: 320px !important;
 }
 
-/* ===== ESPAÇO NO TOPO DA SIDEBAR ===== */
-section[data-testid="stSidebar"] > div:first-child {
-    padding-top: 2rem;
+/* ===== ESPAÇO NO TOPO ===== */
+section[data-testid="stSidebar"] h1:first-of-type {
+    margin-top: -5rem !important;
 }
 
 /* ===== NOME DO AUTOR ===== */
 .author-name-sidebar {
     margin-top: -0.8rem;
+}
+
+/* ===== CONTROLE DA SIDEBAR ===== */
+
+/* Libera o clique no botão de recuar (<<) e esconde apenas a duplicata externa */
+.stApp:has(.stSidebar[aria-expanded="true"]) [data-testid="stSidebarCollapsedControl"] {
+    display: flex !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
 }
 
 </style>
