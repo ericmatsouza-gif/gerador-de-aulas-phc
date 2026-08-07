@@ -74,7 +74,7 @@ section[data-testid="stSidebar"] .block-container {
 
 /* ===== CONTEÚDO APÓS "SOBRE O AUTOR" ===== */
 .author-name-sidebar {
-    margin-top: -2rem;
+    margin-top: -5rem;
 }
 
 </style>
