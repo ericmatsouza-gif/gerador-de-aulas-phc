@@ -74,23 +74,19 @@ section[data-testid="stSidebar"] {
     max-width: 320px !important;
 }
 
-/* ===== ESPAÇO NO TOPO ===== */
+/* ===== ESPAÇO NO TOPO (MANTÉM ALTURA EXACTA SEM BLOQUEAR CLIQUE) ===== */
 section[data-testid="stSidebar"] h1:first-of-type {
     margin-top: -5rem !important;
+    pointer-events: none; /* Deixa o clique do mouse passar direto para o botão << atrás/abaixo dele */
+}
+
+section[data-testid="stSidebar"] h1:first-of-type * {
+    pointer-events: auto; /* Garante que o texto em si ainda seja selecionável se necessário */
 }
 
 /* ===== NOME DO AUTOR ===== */
 .author-name-sidebar {
     margin-top: -0.8rem;
-}
-
-/* ===== CONTROLE DA SIDEBAR ===== */
-
-/* Libera o clique no botão de recuar (<<) e esconde apenas a duplicata externa */
-.stApp:has(.stSidebar[aria-expanded="true"]) [data-testid="stSidebarCollapsedControl"] {
-    display: flex !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
 }
 
 </style>
