@@ -76,29 +76,45 @@ st.markdown("""
     }
 }
 
-/* ===== SIDEBAR NO CELULAR: ocupa a tela toda quando aberta ===== */
+/* ===== MOBILE: forca sidebar colapsada e conteudo em tela cheia ===== */
 @media (max-width: 767px) {
+
     section[data-testid="stSidebar"] {
-        min-width: 85vw !important;
-        max-width: 92vw !important;
+        transform: translateX(-110%) !important;
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        height: 100vh !important;
+        width: 80vw !important;
+        min-width: unset !important;
+        max-width: 85vw !important;
+        z-index: 9999 !important;
+        transition: transform 0.3s ease !important;
     }
 
-    /* Conteúdo principal: padding lateral confortável no celular */
+    section[data-testid="stSidebar"][aria-expanded="true"] {
+        transform: translateX(0%) !important;
+    }
+
+    .main {
+        margin-left: 0 !important;
+        width: 100vw !important;
+    }
+
     .main .block-container {
         padding-left: 1rem !important;
         padding-right: 1rem !important;
         padding-top: 1rem !important;
         max-width: 100% !important;
+        width: 100% !important;
     }
 
-    /* Colunas lado a lado viram empilhadas no celular */
     div[data-testid="column"] {
         width: 100% !important;
         flex: 1 1 100% !important;
         min-width: 100% !important;
     }
 
-    /* Inputs e selects: tamanho de fonte confortável para toque */
     .stTextInput input,
     .stSelectbox select,
     .stMultiSelect,
@@ -106,19 +122,16 @@ st.markdown("""
         font-size: 1rem !important;
     }
 
-    /* Botões maiores no celular para facilitar o toque */
     .stButton>button {
         height: 3.6em !important;
         font-size: 1rem !important;
     }
 
-    /* Abas com texto legível no celular */
     .stTabs [data-baseweb="tab"] {
         font-size: 0.9rem !important;
         padding: 0.5rem 0.75rem !important;
     }
 
-    /* Título principal menor no celular */
     h1 {
         font-size: 1.5rem !important;
     }
