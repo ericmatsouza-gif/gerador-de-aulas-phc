@@ -11,7 +11,7 @@ from google.genai.errors import APIError
 from fpdf import FPDF, XPos, YPos
 
 # ── CONFIGURAÇÃO DA PÁGINA ────────────────────────────────────────────────────
-st.set_page_config(page_title="Gerador de Aulas", page_icon="📚", layout="centered")
+st.set_page_config(page_title="Gerador de Aulas", page_icon="📚", layout="centered", initial_sidebar_state="collapsed")
 
 st.markdown("""
 <style>
