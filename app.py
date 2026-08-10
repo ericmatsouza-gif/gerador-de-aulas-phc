@@ -68,14 +68,63 @@ st.markdown("""
 }
 
 
-/* ===== LARGURA DA SIDEBAR ===== */
-section[data-testid="stSidebar"] {
-    min-width: 320px !important;
-    max-width: 320px !important;
+/* ===== LARGURA DA SIDEBAR — DESKTOP ===== */
+@media (min-width: 768px) {
+    section[data-testid="stSidebar"] {
+        min-width: 320px !important;
+        max-width: 320px !important;
+    }
+}
+
+/* ===== SIDEBAR NO CELULAR: ocupa a tela toda quando aberta ===== */
+@media (max-width: 767px) {
+    section[data-testid="stSidebar"] {
+        min-width: 85vw !important;
+        max-width: 92vw !important;
+    }
+
+    /* Conteúdo principal: padding lateral confortável no celular */
+    .main .block-container {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        padding-top: 1rem !important;
+        max-width: 100% !important;
+    }
+
+    /* Colunas lado a lado viram empilhadas no celular */
+    div[data-testid="column"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
+
+    /* Inputs e selects: tamanho de fonte confortável para toque */
+    .stTextInput input,
+    .stSelectbox select,
+    .stMultiSelect,
+    .stSlider {
+        font-size: 1rem !important;
+    }
+
+    /* Botões maiores no celular para facilitar o toque */
+    .stButton>button {
+        height: 3.6em !important;
+        font-size: 1rem !important;
+    }
+
+    /* Abas com texto legível no celular */
+    .stTabs [data-baseweb="tab"] {
+        font-size: 0.9rem !important;
+        padding: 0.5rem 0.75rem !important;
+    }
+
+    /* Título principal menor no celular */
+    h1 {
+        font-size: 1.5rem !important;
+    }
 }
 
 /* ===== AJUSTE DE ALTURA DO TOPO (SEM BLOQUEAR O BOTÃO <<) ===== */
-/* Puxa o conteúdo para cima via container e descola do botão nativo */
 div[data-testid="stSidebarUserContent"] {
     padding-top: 1rem !important;
 }
